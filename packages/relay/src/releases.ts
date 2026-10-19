@@ -17,8 +17,13 @@ const connectorPackages: Record<Instance["kind"], string> = {
   amp: "@agenvo/amp",
   lody: "@agenvo/lody",
   opencode: "@agenvo/opencode",
+  dsh: "@agenvo/dsh",
+  zcode: "@agenvo/dispatch",
 };
-const packages = ["@agenvo/server", ...Object.values(connectorPackages)];
+const packages = [
+  "@agenvo/server",
+  ...new Set(Object.values(connectorPackages)),
+];
 
 export type ReleaseFetch = (
   url: string,

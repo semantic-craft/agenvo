@@ -1,0 +1,40 @@
+{
+  "name": "@agenvo/dispatch",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Xuanwo/agenvo.git",
+    "directory": "apps/dispatch"
+  },
+  "engines": {
+    "node": ">=24.13.0"
+  },
+  "devDependencies": {
+    "@agenvo/connector": "0.2.0",
+    "@agenvo/protocol": "0.2.0",
+    "zod": "4.6.5"
+  },
+  "description": "DSH desktop and ZCode desktop dispatch connector for Agenvo",
+  "bin": {
+    "agenvo-dispatch": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build.mjs dispatch",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "pino": "10.4.0",
+    "ws": "8.22.0"
+  }
+}
