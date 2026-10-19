@@ -1,7 +1,7 @@
 # agenvo 的最小补丁分支（基于上游 v0.2.0 之后的 main 9ec5643）
 
-上游是 `Xuanwo/agenvo`（Apache-2.0），LICENSE 与 NOTICE 保持不变。分支 `xw/dispatch-connectors`，远端 `semantic-craft/agenvo`
-（本地 remote `xw`，走 SSH；`origin` 保持指向上游）。该仓库已关闭 GitHub Actions：上游 workflow 在历史里，验证在本机执行。
+上游是 `Xuanwo/agenvo`（Apache-2.0），LICENSE 与 NOTICE 保持不变。分支 `xw/dispatch-connectors`，远端是公开 fork `semantic-craft/agenvo`（`main` 只镜像上游）
+（本地 remote `xw`，走 SSH；`origin` 指向上游）。该 fork 已关闭 GitHub Actions，验证在本机执行。
 
 为什么要有这个分支、何时可以去掉、整套基础设施怎么部署和验收，都在 [semantic-craft/agent-fleet](https://github.com/semantic-craft/agent-fleet)，
 尤其是它的 [ADR-0002](https://github.com/semantic-craft/agent-fleet/blob/main/docs/decisions/0002-minimal-agenvo-fork.md)。本文件只记录补丁本身。
