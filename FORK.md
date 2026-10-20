@@ -14,6 +14,7 @@
   `scripts/import-dsh-schema.mjs` 从 DSH 安装包导入原生 schema；`tests/dsh.test.ts` 是桥接契约 fixture 测试。这部分不依赖个人值，可以提给上游。
 - `apps/dispatch`：ZCode 专用 connector `agenvo-dispatch`，薄封装接收端的 `GET /health`、`POST /v1/jobs`、`GET /v1/jobs/<id>`，见其 [README](apps/dispatch/README.md)。
   `jobs.create` 固定发送 `runner: "app"`；`jobs.get` 和 `job.finished` 事件带上实际执行路径 `runner`。
+- `apps/codex-app-server`：不提供 `requests.respond`。agent 向用户提的问题与动态工具调用仍可经 `requests.list` 查看，由用户在 Codex 桌面版里回答；权限审批照上游自动处理。相关测试改为断言该方法不存在（`unsupported_method`）。
 - `tests/dispatch.test.ts`：接收端契约、full access 默认值、`[Project:]` 标签、严格 runner 被拒的情形，以及 `job.finished` 事件。
 
 ## 合并上游
