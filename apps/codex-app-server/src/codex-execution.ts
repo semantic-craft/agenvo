@@ -57,3 +57,20 @@ export function automaticApproval(
       strictAutoReview: false,
     };
 }
+
+export function validateAnswers(
+  method: string,
+  params: Record<string, any>,
+  result: Record<string, any>,
+) {
+  if (method !== "item/tool/requestUserInput") return;
+  const keys = (params.questions ?? []).map((q: any) => q.id);
+  if (
+    Object.keys(result.answers ?? {}).some((k) => !keys.includes(k)) ||
+    keys.some((k: string) => !result.answers?.[k])
+  )
+    throw new Fault(
+      "invalid_params",
+      "Answers must match the pending questions.",
+    );
+}

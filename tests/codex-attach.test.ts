@@ -18,7 +18,7 @@ import { instanceConfigSchema } from "./support/config.js";
 // A second native client owns resolution; the adapter only owns its connection.
 for (const mode of ["unix", "websocket"])
   test(
-    `${mode} explicitly subscribes without turn history, applies full access and reconnects without replay`,
+    `${mode} auto-subscribes without turn history, applies full access and reconnects without replay`,
     {
       skip:
         process.platform === "win32" && mode === "unix"
@@ -90,15 +90,10 @@ for (const mode of ["unix", "websocket"])
       const info = adapter.methods().find((m) => m.name === "thread/resume")!;
       assert.ok((info.inputSchema as any).properties.sandbox);
       const stopWatching = adapter.watchEvents(() => {});
-      await adapter.call("thread/loaded/list", {});
-      assert.equal(
-        calls.some((p) => p.method === "thread/resume"),
-        false,
+      await until(
+        async () => calls.find((p) => p.method === "thread/resume"),
+        Boolean,
       );
-      await adapter.call("thread/resume", {
-        threadId: "t",
-        excludeTurns: true,
-      });
       stopWatching();
       const resumed = calls.find((p) => p.method === "thread/resume").params;
       assert.equal(resumed.threadId, "t");
@@ -157,9 +152,12 @@ for (const mode of ["unix", "websocket"])
         },
       });
       await barrier();
-      assert.equal(
-        ((await adapter.call("requests.list", {})).result as any).items.length,
-        0,
+      await assert.rejects(
+        adapter.call("requests.respond", {
+          interactionId: first.items[0].interactionId,
+          result: { success: true, contentItems: [] },
+        }),
+        { code: "interaction_expired" },
       );
       send({
         id: "local-only",

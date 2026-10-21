@@ -26,7 +26,7 @@ Agenvo 只提供 `search` 和 `execute` 两个 MCP 工具。search 接受关键�
 
 deviceId 标识一个 Connector，不是一台物理机器。离线或无法查询的实例仍返回状态或错误；方法查询失败可能留下部分结果。没有匹配方法的在线实例不出现在非空查询结果中。名称在实例内唯一，不添加 Agenvo 命名空间。
 
-两种 Connector 使用共同的操作词：list、create、read、submit input、interrupt。work context 在 Codex 中是 conversation thread，在 Herdr 中是 terminal pane 内运行的 agent；Herdr session 指原生服务进程，workspace 指终端容器。原生方法名和字段名保留，不把不同对象强行等同。
+两种 Connector 使用共同的操作词：list、create、read、submit input、interrupt、respond。work context 在 Codex 中是 conversation thread，在 Herdr 中是 terminal pane 内运行的 agent；Herdr session 指原生服务进程，workspace 指终端容器。原生方法名和字段名保留，不把不同对象强行等同。
 
 发现结果还会原样携带配置者提供的可选 `context` 自由文本。选择和使用实例时先阅读它；空查询、匹配方法的查询和离线实例均可包含最近通告。上下文不参与方法关键词匹配，不是实时能力或权限保证，也不会自动传入原生调用。配置方式见[实例上下文](usage.zh-CN.md#补充实例上下文)。
 
@@ -103,11 +103,11 @@ return await call(target, "pane.read", {
 
 ## Codex
 
-按 schema 使用 thread/list、thread/start、thread/read、thread/resume、thread/archive 和 thread/unarchive。原生列表的 provider/source 过滤决定发现范围，查找其他客户端的会话时应检查这些参数。通过 turn/start 输入，turn/steer 携带 expectedTurnId，turn/interrupt 携带已知 turnId。新建 thread 后可以直接输入；恢复已有 thread、退订后续接或 Connector 重启后，应先显式 thread/resume 再 turn/start。Agenvo 工作入口使用全权限并自动回答权限审批。
+按 schema 使用 thread/list、thread/start、thread/read、thread/resume、thread/archive 和 thread/unarchive。原生列表的 provider/source 过滤决定发现范围，查找其他客户端的会话时应检查这些参数。通过 turn/start 输入，turn/steer 携带 expectedTurnId，turn/interrupt 携带已知 turnId。未加载会话可能需要先 resume。Agenvo 工作入口使用全权限并自动回答权限审批。
 
 `notifications.list({threadId, cursor?, limit?})` 读取当前连接收到的有界通知，不是持久历史或所有会话的完整覆盖。resume 会话以订阅；resume 不重放历史输出。保存 nextCursor，在淘汰或重连后检查 gap。空会话、临时会话及某些原生版本可能不支持历史读取；历史可用时直接读取，通知用于获取已收到的输出。
 
-`requests.list({threadId?, cursor?})` 返回待回答问题和工具调用，包含原生参数与 responseSchema。调用者取得用户答案或明确的工具结果后，用 `requests.respond({interactionId, response})` 按条目的 `responseSchema` 显式回复，也可以在连接同一 app-server 的原生客户端回答。独立 app-server 的桌面端可能无法接管。成功发送后移除本连接条目；这仅表示已提交，不表示原生轮次完成。标识绑定当前连接代次及原生 request ID；过期、重复、未知标识和不合 schema 的响应会拒绝。若发送结果未知，条目保留 `responseStatus: "unknown"`，不得重试，先检查原生状态。断线后旧标识失效，不自动重放回复。权限审批自动回答，不进入待回答列表。
+`requests.list({threadId?, cursor?})` 返回待回答问题和工具调用，包含原生参数与 responseSchema。可以在 execute 中筛选，再通过 `requests.respond({interactionId, result})` 回答。标识绑定当前连接，重复或过期回应失败。提交成功不证明你的回答赢得其他客户端的并发竞争。权限审批自动回答，不进入待回答列表。
 
 ## Herdr
 
@@ -147,16 +147,3 @@ Herdr 参数校验失败时返回 `invalid_params`，`error.message` 包含字�
 按变化触发观察时使用已有的[事件协议](events.zh-CN.md)，再通过 execute 读取当前状态和输出。
 
 Lody 通过 `lody.*` 方法暴露原生 Session、历史、精确轮次取消和交互。云端与本地连接边界见 [Lody 指南](lody.zh-CN.md)。
-
-
-### Codex 退订与桌面交接
-
-`thread/unsubscribe({threadId})` 只取消本连接订阅。Connector 会先读取原生状态；非 idle/notLoaded、未知状态或存在当前连接已知的待回答请求时拒绝，不中断任务、不代答问题。相同 Connector 中同一 thread 的并发写操作会被拒绝；其他原生客户端仍可能在检查和退订之间启动活动，原生退订不是原子“检查并释放 writer”。
-
-退订返回 `unsubscribed` **不代表桌面立即可续接**。0.163.0 仍保留 loaded thread；官方文档描述最后订阅者离开、无活动 30 分钟后才卸载。用只读 `thread/loaded/list` 验证卸载，不用 archive、删锁或停共享服务替代交接。若有其他订阅者或新活动，等待时间不保证。读取历史用 `thread/read`、`thread/turns/list`，不要为查看结果 resume。
-
-Connector 不再因事件订阅自动 resume 所有 loaded threads。只有明确 start/resume 的 thread 收到事件，网络重连只恢复这些目标。退订开始发送前移除恢复目标；确认丢失或原生拒绝后也不会自动重新抢回，需显式 resume 才恢复事件覆盖。重启 Connector 后同样需要显式 resume，不能依赖实例级订阅发现全部会话。退订后直接 turn/start 会返回 thread_not_subscribed。
-
-需要即时、多客户端续接时，客户端必须连接同一原生 app-server，并确认其事件/交互协议兼容。共用 CODEX_HOME 仅共享历史，不能代替共享运行时。若桌面版本没有受支持的共用服务入口，只能保留单一写入客户端，或等待原生卸载后再接管；本 Connector 不宣称能即时释放其他服务的 writer。
-
-回复用户问题时，`response.answers` 的 key 必须恰好对应原请求所有 `questions[].id`；这是 Connector 的防错校验。可为不作答的题显式提供 `{answers: []}`，不应省略或编造答案。错误 key 或缺题会在发送前拒绝，原请求仍可修正后回答。
