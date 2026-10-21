@@ -240,7 +240,7 @@ test("native Codex preserves notifications, questions, permissions, errors and e
   const call = async (m: string, p = {}) => (await a.call(m, p)).result as any;
   assert.ok(a.methods().every((m) => !m.name.startsWith("management.")));
   assert.ok(!a.methods().some((m) => m.name === "requests.read"));
-  assert.ok(!a.methods().some((m) => m.name === "requests.respond"));
+  assert.ok(a.methods().some((m) => m.name === "requests.respond"));
   await assert.rejects(a.call("management.threads.list", {}), {
     code: "unsupported_method",
   });
@@ -275,13 +275,11 @@ test("native Codex preserves notifications, questions, permissions, errors and e
     (await call("requests.list", { threadId: "other" })).items.length,
     0,
   );
-  await assert.rejects(
-    a.call("requests.respond", {
-      interactionId: request.interactionId,
-      result: { answers: { label: { answers: ["Alpha"] } } },
-    }),
-    { code: "unsupported_method" },
-  );
+  const response = await a.call("requests.respond", {
+    interactionId: request.interactionId,
+    response: { answers: { label: { answers: ["Alpha"] } } },
+  });
+  assert.equal((response.result as any).submitted, true);
   await assert.rejects(
     a.call("thread/turns/list", { threadId: "t", itemsView: "full" }),
     { code: "native_error" },
@@ -305,8 +303,11 @@ test("native Codex preserves notifications, questions, permissions, errors and e
     { code: "invalid_cursor" },
   );
   const native = await call("thread/read", { threadId: "t" });
-  assert.ok(
-    !native.responses.some((r: any) => r.result?.answers !== undefined),
+  assert.deepEqual(
+    native.responses
+      .filter((r: any) => r.result?.answers !== undefined)
+      .map((r: any) => r.result),
+    [{ answers: { label: { answers: ["Alpha"] } } }],
   );
   const starts = native.calls.filter((c: any) => c.method === "turn/start");
   assert.equal(starts.length, 1);

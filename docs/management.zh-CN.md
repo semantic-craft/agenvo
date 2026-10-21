@@ -107,7 +107,7 @@ return await call(target, "pane.read", {
 
 `notifications.list({threadId, cursor?, limit?})` 读取当前连接收到的有界通知，不是持久历史或所有会话的完整覆盖。resume 会话以订阅；resume 不重放历史输出。保存 nextCursor，在淘汰或重连后检查 gap。空会话、临时会话及某些原生版本可能不支持历史读取；历史可用时直接读取，通知用于获取已收到的输出。
 
-`requests.list({threadId?, cursor?})` 返回待回答问题和工具调用，包含原生参数与 responseSchema。由用户在连接同一个 app-server 的原生客户端里回答；独立 app-server 的桌面端可能因 active writer 无法接管，不能假定它可以直接回答；原生服务处理后条目自动消失。标识绑定当前连接。权限审批自动回答，不进入待回答列表。
+`requests.list({threadId?, cursor?})` 返回待回答问题和工具调用，包含原生参数与 responseSchema。调用者取得用户答案或明确的工具结果后，用 `requests.respond({interactionId, response})` 按条目的 `responseSchema` 显式回复，也可以在连接同一 app-server 的原生客户端回答。独立 app-server 的桌面端可能无法接管。成功发送后移除本连接条目；这仅表示已提交，不表示原生轮次完成。标识绑定当前连接代次及原生 request ID；过期、重复、未知标识和不合 schema 的响应会拒绝。若发送结果未知，条目保留 `responseStatus: "unknown"`，不得重试，先检查原生状态。断线后旧标识失效，不自动重放回复。权限审批自动回答，不进入待回答列表。
 
 ## Herdr
 
