@@ -6,7 +6,7 @@ export const executionPolicy = {
   execution: "native-session-full-access",
   approvalPolicy: "permission-preset-danger-full-access",
 };
-// Native DSH permission preset applied before creating or submitting input; its approval policy is `never`.
+// Native DSH permission preset applied by session/create when the caller names none; its approval policy is `never`.
 export const FULL_ACCESS = "danger-full-access";
 
 export const instanceConfigSchema = z.strictObject({

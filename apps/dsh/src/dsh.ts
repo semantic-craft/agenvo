@@ -98,19 +98,19 @@ export class DshAdapter implements Adapter {
     );
   }
 
-  /** Switch a session to the native full-access preset when it is not already there. */
-  private async fullAccess(sessionId: string) {
+  /** Switch a session to a native /permission preset when it is not already there. */
+  private async setPermission(sessionId: string, preset: string) {
     const projections = (await this.invoke(
       "session/projections",
       { request: { sessionId } },
       false,
     )) as Item | null;
-    if (projections?.values?.permissions?.currentValue === FULL_ACCESS) return;
+    if (projections?.values?.permissions?.currentValue === preset) return;
     const run = (await this.invoke(
       "commands/execute",
       {
         agentId: sessionId,
-        line: `/permission ${FULL_ACCESS}`,
+        line: `/permission ${preset}`,
         submittedAttachments: [],
       },
       true,
@@ -118,7 +118,7 @@ export class DshAdapter implements Adapter {
     if (run?.result?.kind !== "success")
       throw new Fault(
         "native_error",
-        `DSH /permission ${FULL_ACCESS} failed`,
+        `DSH /permission ${preset} failed`,
         "unknown",
         run,
       );
@@ -215,8 +215,12 @@ export class DshAdapter implements Adapter {
     const keepStream =
       request.assistantStream === true || params.assistantStream === true;
     // Native top-level schemas reject extra keys (additionalProperties: false); drop the
-    // bridge key before forwarding so it never reaches the native endpoint.
-    const { assistantStream: _assistantStream, ...nativeParams } = params;
+    // bridge keys before forwarding so they never reach the native endpoint.
+    const {
+      assistantStream: _assistantStream,
+      permission,
+      ...nativeParams
+    } = params;
     let sessionId: string | undefined =
       request.sessionId ??
       request.address?.sessionId ??
@@ -228,9 +232,13 @@ export class DshAdapter implements Adapter {
       else if (name === "session/create") {
         result = await this.invoke(name, nativeParams, true);
         sessionId = (result as Item).sessionId;
-        await this.fullAccess(sessionId!);
+        await this.setPermission(
+          sessionId!,
+          typeof permission === "string" ? permission : FULL_ACCESS,
+        );
       } else if (name === "session/prompt") {
-        await this.fullAccess(sessionId!);
+        if (typeof permission === "string")
+          await this.setPermission(sessionId!, permission);
         result = await this.invoke(name, nativeParams, true);
         this.follow(sessionId!);
       } else

@@ -212,7 +212,7 @@ test("dsh connector manages desktop sessions through native endpoints", async (t
     },
   );
 
-  // A session the user opened by hand keeps its preset until input is submitted.
+  // A session the user opened by hand keeps its preset; listing does not switch it.
   native.sessions.set("session-user", { preset: "workspace-write", seq: 5 });
   const listed = await adapter.call("session/list", { _request: {} });
   assert.ok(
@@ -246,16 +246,61 @@ test("dsh connector manages desktop sessions through native endpoints", async (t
   assert.equal(last.result.nextOffset, undefined);
   assert.ok(last.result.items[0].projections.values.tokenUsage);
   for (let n = 0; n < 60; n++) native.sessions.delete(`session-old-${n}`);
+
+  // Create with a permission bridge key runs exactly that /permission, never full access.
+  const ro = await adapter.call("session/create", {
+    request: { cwd: "/work/koe" },
+    permission: "read-only",
+  });
+  assert.equal(ro.execution, "accepted");
+  const roId = ro.nativeIds!.sessionId;
+  assert.equal(native.sessions.get(roId)!.preset, "read-only");
+  const roExecutes = native.calls.filter(
+    (c) => c.endpoint === "commands/execute" && c.args.agentId === roId,
+  );
+  assert.equal(roExecutes.length, 1);
+  assert.equal(roExecutes[0].args.line, "/permission read-only");
+  assert.ok(
+    !native.calls.some(
+      (c) =>
+        c.endpoint === "commands/execute" &&
+        c.args.agentId === roId &&
+        c.args.line === "/permission danger-full-access",
+    ),
+  );
+  // The bridge key is consumed by the Connector and never forwarded to native session/create.
+  const createArgs = native.calls
+    .filter((c) => c.endpoint === "session/create")
+    .at(-1)!.args;
+  assert.equal("permission" in createArgs, false);
+
   const executes = () =>
     native.calls.filter((c) => c.endpoint === "commands/execute").length;
   const before = executes();
-  const prompted = await adapter.call("session/prompt", {
+
+  // Prompt without a permission bridge key runs no /permission and keeps the session's preset.
+  const promptedRo = await adapter.call("session/prompt", {
     request: {
       requestId: "r1",
-      sessionId: "session-user",
+      sessionId: roId,
       mode: "queue",
       content: [{ type: "text", text: "只读：说明项目" }],
     },
+  });
+  assert.equal(promptedRo.execution, "accepted");
+  assert.deepEqual(promptedRo.nativeIds, { sessionId: roId });
+  assert.equal(native.sessions.get(roId)!.preset, "read-only");
+  assert.equal(executes(), before);
+
+  // Prompt with a permission bridge key switches the session first, then submits.
+  const prompted = await adapter.call("session/prompt", {
+    request: {
+      requestId: "r2",
+      sessionId: "session-user",
+      mode: "queue",
+      content: [{ type: "text", text: "写：说明项目" }],
+    },
+    permission: "danger-full-access",
   });
   assert.equal(prompted.execution, "accepted");
   assert.deepEqual(prompted.nativeIds, { sessionId: "session-user" });
@@ -264,15 +309,25 @@ test("dsh connector manages desktop sessions through native endpoints", async (t
     "danger-full-access",
   );
   assert.equal(executes(), before + 1);
-  // Already full access: no second /permission run.
+  // The bridge key is consumed by the Connector and never forwarded to native session/prompt.
+  const promptArgs = native.calls
+    .filter((c) => c.endpoint === "session/prompt")
+    .at(-1)!.args;
+  assert.equal("permission" in promptArgs, false);
+
+  // A prompt without permission on the now-full-access session leaves it unchanged and runs no /permission.
   await adapter.call("session/prompt", {
     request: {
-      requestId: "r2",
+      requestId: "r5",
       sessionId: "session-user",
       mode: "queue",
       content: [{ type: "text", text: "again" }],
     },
   });
+  assert.equal(
+    native.sessions.get("session-user")!.preset,
+    "danger-full-access",
+  );
   assert.equal(executes(), before + 1);
 
   // Durable follow events wake the caller; DSH's own context injections and assistant output do not.

@@ -46,9 +46,14 @@ DSH 桌面版的 Host 运行在 Electron 进程里，认证由桌面载体负责
 
 `accepted` 只说明原生端点接受了调用。`session/prompt` 返回 `{accepted: true}` 表示输入已进入会话，不表示推理开始、完成或业务目标达成；以 `turn/end` 事件和历史为准。
 
-### Full access
+### 权限预设
 
-执行约定由实例 `context` 声明。`session/create` 之后、`session/prompt` 之前，Connector 读取 `session/projections` 的 `permissions.currentValue`，不是 `danger-full-access` 时经原生 `commands/execute` 运行 `/permission danger-full-access`（沙箱 full access、审批 `never`）。这与桌面里切换权限是同一条原生路径：DSH 会在会话里记录策略变化，并向模型注入一条变化通知。已是 full access 时不重复执行。准备步骤与输入不是事务：输入失败时权限切换可能已经生效。审批策略为 `never`，所以不会产生需要回答的审批请求；agent 向用户提的问题仍由调用者用 `userQuestions/answer` 明确回答。
+执行约定由实例 `context` 声明。会话的权限预设由原生服务持有：`session/create` 和 `session/prompt` 接受 Connector 桥接顶层参数 `permission`（原生 `/permission` 预设名，可用 `read-only`、`workspace-write`、`danger-full-access`）。
+
+- `session/create`：创建后把会话切到 `permission`；没传时切到 `danger-full-access`（编码会话默认不变）。
+- `session/prompt`：传了 `permission` 时在提交前把会话切到该值；没传时保持会话当前权限，不做任何切换，已有会话的设置仍由原生服务持有。
+
+切换与桌面里切换权限是同一条原生路径：Connector 先读 `session/projections` 的 `permissions.currentValue`，与目标不同才经原生 `commands/execute` 运行 `/permission <preset>`，相同则不重复执行；DSH 会在会话里记录策略变化，并向模型注入一条变化通知。准备步骤与输入不是事务：输入失败时权限切换可能已经生效。审批策略由原生预设决定（`danger-full-access` 为 `never`，不会产生需要回答的审批请求）；agent 向用户提的问题仍由调用者用 `userQuestions/answer` 明确回答。
 
 ### 结果与错误
 
@@ -64,7 +69,7 @@ Connector 常开一条原生 `session/control` 流。它对每个有活动 agent
 
 接口基线为 DSH 桌面版 `0.2.1-rc.2`，仅用于复现，不是版本白名单。
 
-- `tests/dsh.test.ts`：按插件桥接契约实现的 Unix socket fixture。覆盖共同术语发现、create 与 prompt 前的 full access（已是 full access 时不重复）、列出用户会话、follow 快照与 page、原生拒绝、参数 schema 拒绝、写响应丢失报告 `unknown` 且不重试、事件过滤，以及观察流断开后的 resync 与重连。
+- `tests/dsh.test.ts`：按插件桥接契约实现的 Unix socket fixture。覆盖共同术语发现、create 与 prompt 的权限预设（create 默认 `danger-full-access`，传 `permission` 时只执行一次对应 `/permission`；prompt 不传 `permission` 不切换，传则先切再提交；已是目标值时不重复）、列出用户会话、follow 快照与 page、原生拒绝、参数 schema 拒绝、写响应丢失报告 `unknown` 且不重试、事件过滤，以及观察流断开后的 resync 与重连。
 - 隔离的真实 DSH：临时 `DSH_HOME` 与 `HOME` 下 `dsh web` 加载桥接插件，Connector 实测 `session/list`、`workspace/create`、`session/create`（随后为 `danger-full-access`）、`session/prompt`、`session/follow`、`session/page`、未知会话的 `session/not-found` 拒绝、`session/cancel`，以及 `turn/start`、`user/message`、`turn/end` 事件。没有模型凭据，turn 以原生错误结束，这不影响连接与事件路径的验证。
 - 插件侧测试在 dsh-grokbot-dispatch 的 `test/native-bridge.test.js`。
 

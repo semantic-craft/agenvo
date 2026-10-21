@@ -15,9 +15,9 @@ const descriptions: Record<string, string> = {
   "session/page":
     "Read output from native session history: one message-aligned page of durable events before beforeSeq. throughSeq must not exceed the cursor from session/follow. Cold-safe; does not resume an agent. Each assistant/message record carries the answer text in message.content; the process-local streaming frames (data.stream) are included in records only when assistantStream is true. Use maxMessages to stay under 64 KiB.",
   "session/create":
-    "Create a work context: a new native DSH session that appears in the desktop app sidebar, without submitting input. Pass workspaceId (from workspace/create) to group it under a project, or cwd. The Connector then sets the native permission preset danger-full-access (approval never) through commands/execute /permission. Returns sessionId; follow with session/prompt.",
+    "Create a work context: a new native DSH session that appears in the desktop app sidebar, without submitting input. Pass workspaceId (from workspace/create) to group it under a project, or cwd. The Connector then sets the session's native /permission preset: `permission` when given (read-only, workspace-write, or danger-full-access), otherwise danger-full-access. It reads session/projections permissions.currentValue and runs commands/execute /permission only when the current value differs. Returns sessionId; follow with session/prompt.",
   "session/prompt":
-    "Submit input to an existing native session, including sessions the user opened in the desktop app. Before submitting, the Connector sets the native permission preset danger-full-access when it differs (via /permission). mode queue starts or queues a turn; steer injects into the running turn. requestId makes retries idempotent: a repeated requestId returns the original acceptance. accepted only confirms admission, not inference completion or task success.",
+    "Submit input to an existing native session, including sessions the user opened in the desktop app. When `permission` is given (read-only, workspace-write, or danger-full-access), the Connector first switches the session to that native /permission preset if it differs; without `permission` it leaves the session's current permission unchanged. mode queue starts or queues a turn; steer injects into the running turn. requestId makes retries idempotent: a repeated requestId returns the original acceptance. accepted only confirms admission, not inference completion or task success.",
   "session/cancel":
     "Interrupt the active turn of one native session; queued input stays pending. accepted confirms the request, not that the turn ended; watch turn/end or read session/projections.",
   "session/updateQueue":
@@ -76,12 +76,21 @@ const streamBridge = {
       "Connector bridge: include the process-local assistant presentation frames (data.stream) in records; the answer text is always in message.content.",
   },
 };
+const permissionBridge = {
+  permission: {
+    type: "string",
+    description:
+      "Connector bridge: native /permission preset name to apply to the session (read-only, workspace-write, or danger-full-access).",
+  },
+};
 const bridgeOf = (name: string): Record<string, unknown> | undefined =>
   name === "session/list"
     ? listBridge
     : name === "session/follow" || name === "session/page"
       ? streamBridge
-      : undefined;
+      : name === "session/create" || name === "session/prompt"
+        ? permissionBridge
+        : undefined;
 const schemaOf = (operation: (typeof native.operations)[number]) => {
   const bridge = bridgeOf(operation.name);
   return (
