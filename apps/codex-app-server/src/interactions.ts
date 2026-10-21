@@ -60,6 +60,23 @@ export class Interactions {
       (request) => request.params.threadId === threadId,
     );
   }
+  responseThreadId(original: Record<string, unknown>): string {
+    const p = respondInput.parse(original);
+    const request = this.interactions.get(p.interactionId);
+    if (!request || request.generation !== this.generation())
+      throw new Fault(
+        "interaction_not_found",
+        "Pending request expired",
+        "rejected",
+      );
+    if (typeof request.params.threadId !== "string")
+      throw new Fault(
+        "invalid_params",
+        "Pending request has no thread identity",
+        "rejected",
+      );
+    return request.params.threadId;
+  }
   receive(packet: NativePacket) {
     if (!packet.method) return;
     if (packet.method === "item/completed") {
