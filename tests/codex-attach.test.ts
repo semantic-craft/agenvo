@@ -18,7 +18,7 @@ import { instanceConfigSchema } from "./support/config.js";
 // A second native client owns resolution; the adapter only owns its connection.
 for (const mode of ["unix", "websocket"])
   test(
-    `${mode} auto-subscribes without turn history, applies full access and reconnects without replay`,
+    `${mode} explicitly subscribes without turn history, applies full access and reconnects without replay`,
     {
       skip:
         process.platform === "win32" && mode === "unix"
@@ -90,10 +90,15 @@ for (const mode of ["unix", "websocket"])
       const info = adapter.methods().find((m) => m.name === "thread/resume")!;
       assert.ok((info.inputSchema as any).properties.sandbox);
       const stopWatching = adapter.watchEvents(() => {});
-      await until(
-        async () => calls.find((p) => p.method === "thread/resume"),
-        Boolean,
+      await adapter.call("thread/loaded/list", {});
+      assert.equal(
+        calls.some((p) => p.method === "thread/resume"),
+        false,
       );
+      await adapter.call("thread/resume", {
+        threadId: "t",
+        excludeTurns: true,
+      });
       stopWatching();
       const resumed = calls.find((p) => p.method === "thread/resume").params;
       assert.equal(resumed.threadId, "t");

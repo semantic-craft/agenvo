@@ -42,6 +42,11 @@ export class Interactions {
     this.interactions.clear();
     this.interactionBytes = 0;
   }
+  hasPending(threadId: string) {
+    return [...this.interactions.values()].some(
+      (request) => request.params.threadId === threadId,
+    );
+  }
   receive(packet: NativePacket) {
     if (!packet.method) return;
     if (packet.method === "item/completed") {

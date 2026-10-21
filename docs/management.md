@@ -113,11 +113,11 @@ Inspect the output to decide whether the command has finished. If output is not 
 
 ## Codex
 
-Use `thread/list`, `thread/start`, `thread/read`, `thread/resume`, `thread/archive` and `thread/unarchive` according to their schemas. Native listing filters determine provider/source coverage; inspect these when discovering other clients' threads. Use `turn/start` for input, `turn/steer` with expectedTurnId, and `turn/interrupt` with a known turnId. An unloaded thread may require resume before input. Full-access execution and automatic permission responses apply to Agenvo work entry points.
+Use `thread/list`, `thread/start`, `thread/read`, `thread/resume`, `thread/archive` and `thread/unarchive` according to their schemas. Native listing filters determine provider/source coverage; inspect these when discovering other clients' threads. Use `turn/start` for input, `turn/steer` with expectedTurnId, and `turn/interrupt` with a known turnId. A newly started thread accepts input. Explicitly resume an existing thread before input after unsubscribe or connector restart. Full-access execution and automatic permission responses apply to Agenvo work entry points.
 
 `notifications.list({threadId, cursor?, limit?})` reads bounded events received on this connection. It is not durable history or guaranteed coverage of every thread. Resume a thread to subscribe; resume does not replay past output. Retain nextCursor and inspect gap after eviction or reconnection. Native history may be unavailable for empty or ephemeral threads or in some runtime versions. Use native history when available and notifications for received output.
 
-`requests.list({threadId?, cursor?})` returns pending user questions and tool calls, including their parameters and responseSchema. The user answers them in the native client (for example Codex Desktop); the entries disappear once the native server resolves them. IDs are connection-scoped. Permission approvals are automatic and do not enter this pending list.
+`requests.list({threadId?, cursor?})` returns pending user questions and tool calls, including their parameters and responseSchema. The user answers them in a native client connected to the same app-server; a desktop using a separate app-server may be blocked by the active writer and cannot be assumed to answer them; the entries disappear once the native server resolves them. IDs are connection-scoped. Permission approvals are automatic and do not enter this pending list.
 
 ## Herdr
 
@@ -157,3 +157,14 @@ Herdr parameter validation failures return `invalid_params` with field paths and
 For change-triggered observation, use the existing [events protocol](events.md), then read current state and output through execute.
 
 Lody exposes native Sessions, history, exact-turn cancellation and interactions through `lody.*` methods. See the [Lody guide](lody.md) for cloud and local connection boundaries.
+
+
+### Codex unsubscribe and desktop handoff
+
+`thread/unsubscribe({threadId})` removes this connection's subscription. The connector first reads native state and rejects unknown/non-idle states or known pending requests. It does not interrupt work or answer questions. Concurrent mutations of the same thread through this adapter are rejected; another native client may still start activity between the read and unsubscribe. This is not an atomic idle-and-release operation.
+
+`unsubscribed` does **not** mean a different app-server can immediately resume. Codex 0.163.0 keeps the thread loaded; official documentation describes unloading after 30 minutes without subscribers or activity. Verify unload using read-only `thread/loaded/list`. Other subscribers or new activity can extend retention. Do not archive, delete locks, or stop a shared server to hand off. Use `thread/read` or `thread/turns/list` to inspect history without acquiring a subscription.
+
+Event watching no longer automatically resumes every loaded thread. Only explicitly started/resumed threads have notification coverage; transport reconnect restores only those targets. Unsubscribe removes its recovery target before sending, so an unknown acknowledgement or native rejection cannot trigger automatic reacquisition. Explicitly resume to restore coverage, including after connector restart. Calling turn/start after unsubscribe returns thread_not_subscribed. Instance-wide event subscriptions do not imply coverage of every thread.
+
+Immediate multi-client continuation requires clients attached to the same native app-server with compatible event and interaction protocols. Sharing CODEX_HOME shares history, not live ownership. If the desktop has no supported shared-server attachment, keep a single writing client or wait for native unload before transferring ownership. This connector does not promise immediate cross-server writer release.
