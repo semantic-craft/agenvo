@@ -53,3 +53,20 @@ codex app-server generate-json-schema --experimental --out /tmp/agenvo-codex-sch
 ```
 
 仓库中的[Codex schema](../apps/codex-app-server/src/schema/codex.json)保留导入定义；[执行配置](../apps/codex-app-server/src/codex-execution.ts)负责 full-access 设置和自动权限响应。
+
+
+## 2026-10：显式订阅与交接边界
+
+用户目标是远程派活后在桌面续接。独立 app-server 共用历史但不能同时持有同一 thread writer；轮次完成不释放 writer。0.163.0 生成的协议仅提供 thread/unsubscribe，没有 thread/unload、thread/close 或原子 idle-and-release RPC。隔离双服务、本地模型测试已复现退订成功后仍 loaded、另一服务 resume 返回 active writer；同一服务另一客户端可恢复同一 ID，保留输出与继续输入。
+
+本变更增加原生 thread/unsubscribe，保留原生响应而不伪造“已交还桌面”。执行前核对 idle/notLoaded 与本连接已知待处理交互；同 thread 的本连接变更互斥。它不保证与其他客户端活动原子互斥，也不停止运行中工作。当前连接丢失的交互覆盖不能从旧通知推定；未知原生状态失败关闭。
+
+删除每 3 秒遍历 loaded 并 resume 的自动发现，避免刚退订后或 Connector 重启后再次持有会话。退订发送前删除内存 resumeTargets，原生拒绝或回执丢失也要求显式 resume 恢复；重连不重放输入。后续 turn/start 必须已有本 Connector 的明确订阅目标，避免接受输入却无结果通知。订阅不随 turn/completed 自动移除：完成可能仍需远程追问，交接是显式操作。
+
+安全替代架构是所有交互客户端附着同一个受支持的 app-server，而不是各自启动服务共享 CODEX_HOME。测试只证明原生同服务多客户端协议，不证明当前桌面 UI 已支持此拓扑。部署前必须独立确认桌面支持的入口；没有入口时不能声称根治即时续接，也不能用重启、archive/unarchive 或删锁规避。
+
+验证：tests/codex-handoff.test.ts 使用协议 mock 覆盖 active、pending、同连接并发、idle、重连、重启、回执丢失与显式恢复；tests/native/codex-handoff-0.163.test.ts 使用独立 HOME/CODEX_HOME、两个真实服务及本地模型，覆盖真实 writer 拒绝、同服务续接和两轮历史。没有生产任务、真实 provider 或凭据。原生宽限期的完整 30 分钟到期路径未运行，不把文档时长当成本机已测结果。
+
+schema 基线保留 0.160.1；新增 thread/unsubscribe 单独标注 0.163.0 来源。导入脚本分别接受两份 generate-json-schema 目录，避免把其余方法整体升级或丢失来源。
+
+该0.163.0兼容性回归通过 npm run test:codex-handoff 显式执行，要求 PATH 指向0.163.0。它不纳入仍固定0.160.1的 test:adapters，不把新版特定行为强加给旧版CI。

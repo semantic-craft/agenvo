@@ -20,7 +20,8 @@
     "release:publish": "node scripts/release.ts publish",
     "release:github": "node scripts/release.ts github",
     "release:trust": "node scripts/release.ts trust",
-    "release:bootstrap": "node scripts/release.ts bootstrap"
+    "release:bootstrap": "node scripts/release.ts bootstrap",
+    "test:codex-handoff": "tsx --test tests/native/codex-handoff-0.163.test.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261006.1",
