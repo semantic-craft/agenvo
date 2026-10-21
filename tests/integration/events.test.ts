@@ -111,17 +111,5 @@ test(
     });
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(lab.received.length, count);
-    // Native unsubscribe is distinct from relay webhook unsubscribe and remains
-    // available through the authenticated MCP -> connector -> native path.
-    assert.deepEqual(
-      await lab.call(device, "codex", "thread/unsubscribe", { threadId }),
-      { status: "unsubscribed" },
-    );
-    await lab.call(device, "codex", "thread/resume", { threadId });
-    assert.equal(
-      (await lab.call(device, "codex", "thread/read", { threadId })).thread
-        .status.type,
-      "idle",
-    );
   },
 );

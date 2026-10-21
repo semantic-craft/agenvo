@@ -65,16 +65,21 @@ test("native transport automatically approves permissions and retains user quest
   );
   for (const i of list.items) {
     assert.ok(i.responseSchema);
+    const result =
+      i.method === "item/tool/call"
+        ? { success: true, contentItems: [] }
+        : { answers: { label: { answers: ["Alpha"] } } };
+    await a.call("requests.respond", {
+      interactionId: i.interactionId,
+      result,
+    });
     await assert.rejects(
-      a.call("requests.respond", {
-        interactionId: i.interactionId,
-        response: {},
-      }),
-      { code: "invalid_params" },
+      a.call("requests.respond", { interactionId: i.interactionId, result }),
+      { code: "interaction_expired" },
     );
   }
   history = (await a.call("thread/read", { threadId: "t" })).result;
-  assert.equal(history.responses.length, 3);
+  assert.equal(history.responses.length, 5);
   assert.equal(
     history.responses.find((r: any) => r.id === "native-5"),
     undefined,

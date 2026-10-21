@@ -28,7 +28,7 @@ Queries are case-insensitive whitespace-separated keywords; all words must occur
 
 A deviceId identifies a Connector, not a physical machine. Offline or unavailable instances retain their status or error; a failed method lookup may leave partial results. Online instances without matching methods are omitted from nonempty searches. Names are unique within an instance; no Agenvo namespace is required.
 
-Both Connectors use common operation terms: list, create, read, submit input and interrupt. A work context is a conversation thread in Codex and an agent running in a terminal pane in Herdr. A Herdr session is a native service process; a workspace is a terminal container. Native method and field names remain unchanged, preserving these differences.
+Both Connectors use common operation terms: list, create, read, submit input, interrupt and respond. A work context is a conversation thread in Codex and an agent running in a terminal pane in Herdr. A Herdr session is a native service process; a workspace is a terminal container. Native method and field names remain unchanged, preserving these differences.
 
 Discovery results also carry the optional owner-supplied `context` text unchanged. Read it when choosing and using an instance. Empty queries, matching method queries, and offline instances can all include the last announcement. Context does not participate in method keyword matching, guarantee live capabilities or permissions, or automatically enter native calls. See [instance context configuration](usage.md#add-instance-context).
 
@@ -113,11 +113,11 @@ Inspect the output to decide whether the command has finished. If output is not 
 
 ## Codex
 
-Use `thread/list`, `thread/start`, `thread/read`, `thread/resume`, `thread/archive` and `thread/unarchive` according to their schemas. Native listing filters determine provider/source coverage; inspect these when discovering other clients' threads. Use `turn/start` for input, `turn/steer` with expectedTurnId, and `turn/interrupt` with a known turnId. A newly started thread accepts input. Explicitly resume an existing thread before input after unsubscribe or connector restart. Full-access execution and automatic permission responses apply to Agenvo work entry points.
+Use `thread/list`, `thread/start`, `thread/read`, `thread/resume`, `thread/archive` and `thread/unarchive` according to their schemas. Native listing filters determine provider/source coverage; inspect these when discovering other clients' threads. Use `turn/start` for input, `turn/steer` with expectedTurnId, and `turn/interrupt` with a known turnId. An unloaded thread may require resume before input. Full-access execution and automatic permission responses apply to Agenvo work entry points.
 
 `notifications.list({threadId, cursor?, limit?})` reads bounded events received on this connection. It is not durable history or guaranteed coverage of every thread. Resume a thread to subscribe; resume does not replay past output. Retain nextCursor and inspect gap after eviction or reconnection. Native history may be unavailable for empty or ephemeral threads or in some runtime versions. Use native history when available and notifications for received output.
 
-`requests.list({threadId?, cursor?})` returns pending user questions and tool calls, including their parameters and responseSchema. After obtaining an explicit user answer or tool result, call `requests.respond({interactionId, response})` using the entry’s `responseSchema`, or answer through a native client attached to the same app-server. A separate desktop app-server may be unable to take over. A successful send removes the local entry and means submitted, not native turn completion. IDs bind the connection generation and native request ID. Stale, duplicate, unknown IDs and invalid responses are rejected. An uncertain send retains `responseStatus: "unknown"`; inspect native state instead of retrying. Disconnect invalidates old IDs; responses are never automatically replayed. Permission approvals are automatic and do not enter this pending list.
+`requests.list({threadId?, cursor?})` returns pending user questions and tool calls, including their parameters and responseSchema. Select the desired entry inside execute, then answer with `requests.respond({interactionId, result})`. IDs are connection-scoped; expired or duplicate responses fail. Submission does not prove your answer won a race with another client. Permission approvals are automatic and do not enter this pending list.
 
 ## Herdr
 
@@ -157,16 +157,3 @@ Herdr parameter validation failures return `invalid_params` with field paths and
 For change-triggered observation, use the existing [events protocol](events.md), then read current state and output through execute.
 
 Lody exposes native Sessions, history, exact-turn cancellation and interactions through `lody.*` methods. See the [Lody guide](lody.md) for cloud and local connection boundaries.
-
-
-### Codex unsubscribe and desktop handoff
-
-`thread/unsubscribe({threadId})` removes this connection's subscription. The connector first reads native state and rejects unknown/non-idle states or known pending requests. It does not interrupt work or answer questions. Concurrent mutations of the same thread through this adapter are rejected; another native client may still start activity between the read and unsubscribe. This is not an atomic idle-and-release operation.
-
-`unsubscribed` does **not** mean a different app-server can immediately resume. Codex 0.163.0 keeps the thread loaded; official documentation describes unloading after 30 minutes without subscribers or activity. Verify unload using read-only `thread/loaded/list`. Other subscribers or new activity can extend retention. Do not archive, delete locks, or stop a shared server to hand off. Use `thread/read` or `thread/turns/list` to inspect history without acquiring a subscription.
-
-Event watching no longer automatically resumes every loaded thread. Only explicitly started/resumed threads have notification coverage; transport reconnect restores only those targets. Unsubscribe removes its recovery target before sending, so an unknown acknowledgement or native rejection cannot trigger automatic reacquisition. Explicitly resume to restore coverage, including after connector restart. Calling turn/start after unsubscribe returns thread_not_subscribed. Instance-wide event subscriptions do not imply coverage of every thread.
-
-Immediate multi-client continuation requires clients attached to the same native app-server with compatible event and interaction protocols. Sharing CODEX_HOME shares history, not live ownership. If the desktop has no supported shared-server attachment, keep a single writing client or wait for native unload before transferring ownership. This connector does not promise immediate cross-server writer release.
-
-For user-question responses, `response.answers` keys must exactly match all original `questions[].id` values. This is a connector safeguard. An explicit `{answers: []}` is allowed for an unanswered question; do not omit the key or invent an answer. Invalid keys or missing questions are rejected before sending and leave the request available for correction.

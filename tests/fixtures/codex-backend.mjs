@@ -149,8 +149,6 @@ server.on("connection", (socket) => {
           ],
         },
       });
-    if (packet.method === "thread/unsubscribe")
-      result = { status: "unsubscribed" };
     if (packet.method === "thread/read") result = { responses, calls, thread };
     if (packet.method === "thread/list")
       result = { data: [thread], nextCursor: null };

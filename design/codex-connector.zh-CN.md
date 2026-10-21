@@ -4,13 +4,13 @@ Codex Connector 暴露原生 thread/turn 能力，以及连接通知和服务端
 
 ## 连接与执行
 
-Connector 仅通过 Unix socket 或 loopback WebSocket 连接独立运行的 app-server，不启动或终止原生进程。Connector 的关闭、更新和重启不停止服务或轮次。配置只记录已有 home、默认工作目录与端点，不创建 Codex home；初始化核对原生 `codexHome`，版本取自 `initialize.userAgent`。Windows 使用 loopback WebSocket。创建、恢复和输入路径应用 full access / never，自动回答执行权限请求；用户问题和动态工具调用可在同一原生客户端回答，或由调用者取得明确答案后经 `requests.respond` 回复，Connector 经 `requests.list` 列出待响应条目。
+Connector 仅通过 Unix socket 或 loopback WebSocket 连接独立运行的 app-server，不启动或终止原生进程。Connector 的关闭、更新和重启不停止服务或轮次。配置只记录已有 home、默认工作目录与端点，不创建 Codex home；初始化核对原生 `codexHome`，版本取自 `initialize.userAgent`。Windows 使用 loopback WebSocket。创建、恢复和输入路径应用 full access / never，自动回答执行权限请求；用户问题和动态工具调用仍需调用者提供内容。
 
 方法保留原生名称及 threadId、turnId。`thread/start` 创建工作上下文，`turn/start` 提交输入；未加载会话可能需要先 resume。列表过滤决定 provider/source 覆盖范围，不将当前加载集合解释为全部持久会话。
 
 ## 请求与通知桥接
 
-服务端主动发来的请求不是普通 RPC 调用。`requests.list` 返回完整待响应请求、参数和 responseSchema，供调用者查看并取得明确答案，再以 `requests.respond({interactionId, response})` 提交符合原请求 schema 的官方 JSON-RPC response；不自动代答。成功写入连接后清除本地条目，不声称原生执行已确认；写入失败标 unknown 并禁止同条目重试。原生服务自行处理后条目随 `serverRequest/resolved`、`item/completed` 或轮次结束清除。请求标识同时绑定连接代次和原生 ID；旧代次、已解决和重复回复被拒绝，校验失败不消耗请求。断线不重放回复。同代次重复通知不重新开放 unknown 的发送。自动处理的权限审批不进入待回答列表。
+服务端主动发来的请求不是普通 RPC 调用。`requests.list` 返回完整待响应请求、参数和 responseSchema，`requests.respond` 提交回答，不需要单独的 read 方法。请求标识绑定当前连接，重复或过期回应明确失败；提交成功不保证赢得与其他客户端的回应竞争。自动处理的权限审批不进入待回答列表。
 
 `notifications.list` 返回当前连接已收到的有界原生通知，按 threadId 和 cursor 读取并报告 gap。resume 会话以订阅，但不重放过去输出；未订阅、断线或淘汰会造成缺口。它不提供持久历史或全实例日志。原生历史可用时直接读取；待响应请求独立保存，不能从可淘汰事件日志推导。
 
@@ -41,7 +41,9 @@ Connector 仅通过 Unix socket 或 loopback WebSocket 连接独立运行的 app
 
 协议测试覆盖自动权限响应、用户交互、多客户端请求失效、断线后恢复订阅且不重放输入，以及 home 身份与 Unix 目录权限检查。配置和 doctor 测试检查缺失服务保持不可用且不创建 home。Windows 使用同一 WebSocket 路径；Unix socket 测试只适用于 macOS/Linux。
 
-原生历史不可读时，连接通知日志是已收到输出的唯一记录；事件淘汰后未响应的请求仍要保留，因此通知记录与待响应请求分开保存。
+重构前的 `66aa871d17b1d912e709f4870fe75d9d09a84074` 使用隔离 Codex 0.160.1 和本地模型 mock 验证：禁用统一 management 方法后，创建、发现、读取模型输出、steer、拒绝错误 turnId、interrupt、归档和恢复仍能完成。协议 fixture 证明 `requests.list` 已包含原 `requests.read` 的完整条目，list 后直接 respond 可以回答，重复回应失败。
+
+原生历史不可读时，移除连接通知日志会丢失已收到的输出；事件淘汰后，未响应请求仍需保留。这支持删除统一公共包装及多余读取接口，同时保留通知记录和独立请求集合。初次探针有一次未定位的原生错误，后续通过不构成稳定性证明；这些历史实验不能代替变更后的真实 MCP 入口验证。
 
 ## 更新接口基线
 
@@ -53,24 +55,3 @@ codex app-server generate-json-schema --experimental --out /tmp/agenvo-codex-sch
 ```
 
 仓库中的[Codex schema](../apps/codex-app-server/src/schema/codex.json)保留导入定义；[执行配置](../apps/codex-app-server/src/codex-execution.ts)负责 full-access 设置和自动权限响应。
-
-
-## 2026-10：显式订阅与交接边界
-
-用户目标是远程派活后在桌面续接。独立 app-server 共用历史但不能同时持有同一 thread writer；轮次完成不释放 writer。0.163.0 生成的协议仅提供 thread/unsubscribe，没有 thread/unload、thread/close 或原子 idle-and-release RPC。隔离双服务、本地模型测试已复现退订成功后仍 loaded、另一服务 resume 返回 active writer；同一服务另一客户端可恢复同一 ID，保留输出与继续输入。
-
-本变更增加原生 thread/unsubscribe，保留原生响应而不伪造“已交还桌面”。执行前核对 idle/notLoaded 与本连接已知待处理交互；同 thread 的本连接变更互斥。它不保证与其他客户端活动原子互斥，也不停止运行中工作。当前连接丢失的交互覆盖不能从旧通知推定；未知原生状态失败关闭。
-
-删除每 3 秒遍历 loaded 并 resume 的自动发现，避免刚退订后或 Connector 重启后再次持有会话。退订发送前删除内存 resumeTargets，原生拒绝或回执丢失也要求显式 resume 恢复；重连不重放输入。后续 turn/start 必须已有本 Connector 的明确订阅目标，避免接受输入却无结果通知。订阅不随 turn/completed 自动移除：完成可能仍需远程追问，交接是显式操作。
-
-安全替代架构是所有交互客户端附着同一个受支持的 app-server，而不是各自启动服务共享 CODEX_HOME。测试只证明原生同服务多客户端协议，不证明当前桌面 UI 已支持此拓扑。部署前必须独立确认桌面支持的入口；没有入口时不能声称根治即时续接，也不能用重启、archive/unarchive 或删锁规避。
-
-验证：tests/codex-handoff.test.ts 使用协议 mock 覆盖 active、pending、同连接并发、idle、重连、重启、回执丢失与显式恢复；tests/native/codex-handoff-0.163.test.ts 使用独立 HOME/CODEX_HOME、两个真实服务及本地模型，覆盖真实 writer 拒绝、同服务续接和两轮历史。没有生产任务、真实 provider 或凭据。原生宽限期的完整 30 分钟到期路径未运行，不把文档时长当成本机已测结果。
-
-schema 基线保留 0.160.1；新增 thread/unsubscribe 单独标注 0.163.0 来源。导入脚本分别接受两份 generate-json-schema 目录，避免把其余方法整体升级或丢失来源。
-
-该0.163.0兼容性回归通过 npm run test:codex-handoff 显式执行，要求 PATH 指向0.163.0。它不纳入仍固定0.160.1的 test:adapters，不把新版特定行为强加给旧版CI。
-
-### 用户问题答案的关联校验
-
-Codex 0.163.0 的[官方响应类型](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/protocol/src/request_user_input.rs#L40-L48)是答案 map，每题答案为字符串数组；它本身不要求 key 覆盖所有问题。[原生 handler](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/request_user_input.rs#L94-L108)读取匹配 question ID 的回答，并跳过缺失或空答案。因此“keys 恰好匹配待答问题”是本 Connector 防止错配和无意漏答的提交约束，不宣称是官方 schema 的要求：缺失、错误或额外 key，以及原请求中缺失/重复的 question ID，均在发送前拒绝且不消耗请求。每题显式 `answers: []` 仍允许，不强制非空或选定某个选项，也不伪造答案。原请求 `questions: []` 仅接受 `answers: {}`。

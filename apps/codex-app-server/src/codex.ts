@@ -21,8 +21,6 @@ const descriptions: Record<keyof typeof schemas.methods, string> = {
   "thread/loaded/list": "List thread IDs loaded in the native server.",
   "thread/start":
     "Create a work context as a conversation thread without submitting input. Uses full access with no execution approval.",
-  "thread/unsubscribe":
-    "Unsubscribe this connection from an idle thread with no pending requests. This does not immediately release the native writer; wait for notLoaded before another app-server resumes. Explicitly resume to receive events again.",
   "thread/resume":
     "Load and subscribe to a thread without sending input. Applies full access; past notifications are not replayed.",
   "thread/read":
@@ -36,7 +34,7 @@ const descriptions: Record<keyof typeof schemas.methods, string> = {
     "Read paginated native turns. Some servers or ephemeral threads cannot supply history; use received notifications when available.",
   "thread/items/list": "Read paginated native conversation items.",
   "turn/start":
-    "Submit input to a thread subscribed on this connection. Explicitly resume first after unsubscribe or connector restart. Returns the native turn ID; accepted does not establish task success. Uses full access.",
+    "Submit input to a loaded thread. Resume an unloaded thread first. Returns the native turn ID; accepted does not establish task success. Uses full access.",
   "turn/steer":
     "Submit additional input to the active turn identified by expectedTurnId. The native service rejects a mismatched turn ID.",
   "turn/interrupt":
@@ -55,7 +53,6 @@ export class CodexAdapter implements Adapter {
   private generation = randomUUID();
   private interactions: Interactions;
   private closed = false;
-  private readonly threadCalls = new Set<string>();
   private readonly notifications = new Observations();
   constructor(public config: CodexConfig) {
     this.interactions = new Interactions(
@@ -168,13 +165,47 @@ export class CodexAdapter implements Adapter {
   watchEvents(emit: (event: RuntimeEvent) => void) {
     this.stopEvents?.();
     this.eventSink = emit;
-    // Discovery must not acquire subscriptions: an idle thread can be waiting
-    // for native unload after another client deliberately unsubscribed.
+    let busy = false,
+      stopped = false;
+    const discover = async () => {
+      if (busy || stopped || !this.available) return;
+      busy = true;
+      try {
+        let cursor: string | undefined;
+        do {
+          const result: any = await this.rpc("thread/loaded/list", {
+            cursor,
+            limit: 50,
+          });
+          for (const id of result.data ?? []) {
+            if (stopped) return;
+            const threadId = typeof id === "string" ? id : id.id;
+            if (
+              typeof threadId === "string" &&
+              !this.resumeTargets.has(threadId)
+            )
+              await this.call("thread/resume", {
+                threadId,
+                excludeTurns: true,
+              });
+          }
+          cursor = result.nextCursor ?? undefined;
+        } while (cursor && !stopped);
+      } catch {
+        /* Native disconnect/reconnect is reported by the transport. */
+      } finally {
+        busy = false;
+      }
+    };
+    void discover();
+    const timer = setInterval(() => void discover(), 3000);
+    timer.unref();
     return (this.stopEvents = () => {
+      stopped = true;
+      clearInterval(timer);
       this.eventSink = undefined;
     });
   }
-
   private publishEvent(
     nativeType: string,
     native: Record<string, unknown>,
@@ -294,66 +325,16 @@ export class CodexAdapter implements Adapter {
         .parse(original);
       return accepted(this.notifications.list(p.threadId, p.cursor, p.limit));
     }
-    if (method.startsWith("requests.") && method !== "requests.respond")
+    if (method.startsWith("requests."))
       return this.interactions.call(method, original);
-    if (method !== "requests.respond") {
-      const validator = methodValidators.get(method);
-      if (!validator) throw new Fault("unsupported_method");
-      validate(validator, original);
-    }
-    const threadId =
-      method === "requests.respond"
-        ? this.interactions.responseThreadId(original)
-        : typeof original.threadId === "string"
-          ? original.threadId
-          : undefined;
-    const mutating = !/(?:\/list|\/read)$/.test(method);
-    if (threadId && mutating && this.threadCalls.has(threadId))
-      throw new Fault("thread_busy", "Another thread operation is in progress");
-    if (threadId && mutating) this.threadCalls.add(threadId);
-    try {
-      if (method === "requests.respond")
-        return this.interactions.call(method, original);
-      return await this.callNative(method, original);
-    } finally {
-      if (threadId && mutating) this.threadCalls.delete(threadId);
-    }
-  }
-  private async callNative(
-    method: string,
-    original: Record<string, unknown>,
-  ): Promise<Outcome> {
+    const validator = methodValidators.get(method);
+    if (!validator) throw new Fault("unsupported_method");
+    validate(validator, original);
     const params = executionParams(this.config, method, original);
-    const threadId = String(params.threadId);
-    if (method === "turn/start" && !this.resumeTargets.has(threadId))
-      throw new Fault(
-        "thread_not_subscribed",
-        "Explicitly resume the thread before submitting input",
-      );
-    if (method === "thread/unsubscribe") {
-      const connection = this.connection;
-      const state: any = await this.rpc("thread/read", { threadId });
-      // Fail closed on unknown state or a changed connection. Never interrupt a
-      // turn or resolve a user's pending interaction as a side effect of release.
-      if (connection !== this.connection || !connection?.isOpen)
-        throw new Fault("runtime_unavailable");
-      if (
-        !["idle", "notLoaded"].includes(state?.thread?.status?.type) ||
-        this.interactions.hasPending(threadId)
-      )
-        throw new Fault(
-          "thread_busy",
-          "Thread must be idle with no pending requests before unsubscribing",
-        );
-      // Remove BEFORE sending: an uncertain acknowledgement must not cause a
-      // reconnect to undo a possibly successful unsubscribe. Explicit resume is
-      // required to restore coverage, including after a native rejection.
-      this.resumeTargets.delete(threadId);
-    }
     if (
       ["thread/start", "thread/resume"].includes(method) &&
       this.resumeTargets.size >= 128 &&
-      !this.resumeTargets.has(threadId)
+      !this.resumeTargets.has(String(params.threadId))
     )
       throw new Fault("resource_exhausted");
     const result: any = await this.rpc(method, params);
@@ -363,10 +344,11 @@ export class CodexAdapter implements Adapter {
     ) {
       this.resumeTargets.add(result.thread.id);
     }
-    if (method === "thread/archive") this.resumeTargets.delete(threadId);
+    if (method === "thread/archive") {
+      this.resumeTargets.delete(String(params.threadId));
+    }
     return accepted(result);
   }
-
   async close() {
     this.closed = true;
     this.stopEvents?.();
