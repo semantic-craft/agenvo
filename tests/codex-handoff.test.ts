@@ -24,7 +24,7 @@ test("explicit unsubscribe guards work, survives reconnect, and does not redisco
     ws.on("message", (raw) => {
       const p = JSON.parse(raw.toString());
       calls.push(p);
-      if (p.id === undefined) return;
+      if (p.id === undefined || !p.method) return;
       if (p.method === "thread/unsubscribe" && dropUnsubscribe) {
         ws.terminate();
         return;
@@ -86,6 +86,32 @@ test("explicit unsubscribe guards work, survives reconnect, and does not redisco
   await adapter.call("model/list", {});
   await assert.rejects(adapter.call("thread/unsubscribe", { threadId: "t" }), {
     code: "thread_busy",
+  });
+  const pending = (await adapter.call("requests.list", {})).result as any;
+  const response = {
+    interactionId: pending.items[0].interactionId,
+    response: { answers: {} },
+  };
+  holdRead = true;
+  const guardedRelease = adapter.call("thread/unsubscribe", { threadId: "t" });
+  await until(() => releaseRead, Boolean);
+  await assert.rejects(adapter.call("requests.respond", response), {
+    code: "thread_busy",
+  });
+  assert.equal(calls.filter((p) => p.id === "question" && !p.method).length, 0);
+  assert.equal(
+    ((await adapter.call("requests.list", {})).result as any).items.length,
+    1,
+  );
+  releaseRead!();
+  await assert.rejects(guardedRelease, { code: "thread_busy" });
+  holdRead = false;
+  releaseRead = undefined;
+  await adapter.call("requests.respond", response);
+  await adapter.call("model/list", {});
+  assert.equal(calls.filter((p) => p.id === "question" && !p.method).length, 1);
+  await assert.rejects(adapter.call("requests.respond", response), {
+    code: "interaction_not_found",
   });
   peer!.send(
     JSON.stringify({

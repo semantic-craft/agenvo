@@ -34,7 +34,7 @@ Connector 只负责连接，不安装、启动、停止或重启 Codex；更新�
 
 macOS/Linux 可用 `--endpoint unix:///absolute/control.sock` 连接兼容的 Unix 控制端点。省略端点时，默认使用 `--home` 下的 `app-server-control/app-server-control.sock`。socket 及其父目录必须属于当前用户，父目录不能允许其他用户写入。只共享该端点能访问的会话；桌面 App 的 stdio 进程不会自动提供监听端点。
 
-Codex 工作固定使用 `danger-full-access` 和 `approvalPolicy: never`，包括 thread 创建、恢复和新输入。执行权限请求自动回答。用户问题和动态工具调用由用户在原生客户端回答。
+Codex 工作固定使用 `danger-full-access` 和 `approvalPolicy: never`，包括 thread 创建、恢复和新输入。执行权限请求自动回答。用户问题和动态工具调用可在同一原生客户端回答，或由调用者取得明确答案后经 `requests.respond` 回复。
 
 Windows 使用 PowerShell 和 loopback WebSocket 端点，先独立启动原生服务：
 

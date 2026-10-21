@@ -294,18 +294,26 @@ export class CodexAdapter implements Adapter {
         .parse(original);
       return accepted(this.notifications.list(p.threadId, p.cursor, p.limit));
     }
-    if (method.startsWith("requests."))
+    if (method.startsWith("requests.") && method !== "requests.respond")
       return this.interactions.call(method, original);
-    const validator = methodValidators.get(method);
-    if (!validator) throw new Fault("unsupported_method");
-    validate(validator, original);
+    if (method !== "requests.respond") {
+      const validator = methodValidators.get(method);
+      if (!validator) throw new Fault("unsupported_method");
+      validate(validator, original);
+    }
     const threadId =
-      typeof original.threadId === "string" ? original.threadId : undefined;
+      method === "requests.respond"
+        ? this.interactions.responseThreadId(original)
+        : typeof original.threadId === "string"
+          ? original.threadId
+          : undefined;
     const mutating = !/(?:\/list|\/read)$/.test(method);
     if (threadId && mutating && this.threadCalls.has(threadId))
       throw new Fault("thread_busy", "Another thread operation is in progress");
     if (threadId && mutating) this.threadCalls.add(threadId);
     try {
+      if (method === "requests.respond")
+        return this.interactions.call(method, original);
       return await this.callNative(method, original);
     } finally {
       if (threadId && mutating) this.threadCalls.delete(threadId);

@@ -4,13 +4,13 @@ Codex Connector 暴露原生 thread/turn 能力，以及连接通知和服务端
 
 ## 连接与执行
 
-Connector 仅通过 Unix socket 或 loopback WebSocket 连接独立运行的 app-server，不启动或终止原生进程。Connector 的关闭、更新和重启不停止服务或轮次。配置只记录已有 home、默认工作目录与端点，不创建 Codex home；初始化核对原生 `codexHome`，版本取自 `initialize.userAgent`。Windows 使用 loopback WebSocket。创建、恢复和输入路径应用 full access / never，自动回答执行权限请求；用户问题和动态工具调用由用户在原生客户端回答，Connector 经 `requests.list` 列出待响应条目。
+Connector 仅通过 Unix socket 或 loopback WebSocket 连接独立运行的 app-server，不启动或终止原生进程。Connector 的关闭、更新和重启不停止服务或轮次。配置只记录已有 home、默认工作目录与端点，不创建 Codex home；初始化核对原生 `codexHome`，版本取自 `initialize.userAgent`。Windows 使用 loopback WebSocket。创建、恢复和输入路径应用 full access / never，自动回答执行权限请求；用户问题和动态工具调用可在同一原生客户端回答，或由调用者取得明确答案后经 `requests.respond` 回复，Connector 经 `requests.list` 列出待响应条目。
 
 方法保留原生名称及 threadId、turnId。`thread/start` 创建工作上下文，`turn/start` 提交输入；未加载会话可能需要先 resume。列表过滤决定 provider/source 覆盖范围，不将当前加载集合解释为全部持久会话。
 
 ## 请求与通知桥接
 
-服务端主动发来的请求不是普通 RPC 调用。`requests.list` 返回完整待响应请求、参数和 responseSchema，供调用者查看；用户在原生客户端回答，原生服务处理后条目随 `serverRequest/resolved`、`item/completed` 或轮次结束清除。请求标识绑定当前连接。自动处理的权限审批不进入待回答列表。
+服务端主动发来的请求不是普通 RPC 调用。`requests.list` 返回完整待响应请求、参数和 responseSchema，供调用者查看并取得明确答案，再以 `requests.respond({interactionId, response})` 提交符合原请求 schema 的官方 JSON-RPC response；不自动代答。成功写入连接后清除本地条目，不声称原生执行已确认；写入失败标 unknown 并禁止同条目重试。原生服务自行处理后条目随 `serverRequest/resolved`、`item/completed` 或轮次结束清除。请求标识同时绑定连接代次和原生 ID；旧代次、已解决和重复回复被拒绝，校验失败不消耗请求。断线不重放回复。同代次重复通知不重新开放 unknown 的发送。自动处理的权限审批不进入待回答列表。
 
 `notifications.list` 返回当前连接已收到的有界原生通知，按 threadId 和 cursor 读取并报告 gap。resume 会话以订阅，但不重放过去输出；未订阅、断线或淘汰会造成缺口。它不提供持久历史或全实例日志。原生历史可用时直接读取；待响应请求独立保存，不能从可淘汰事件日志推导。
 
@@ -70,3 +70,7 @@ codex app-server generate-json-schema --experimental --out /tmp/agenvo-codex-sch
 schema 基线保留 0.160.1；新增 thread/unsubscribe 单独标注 0.163.0 来源。导入脚本分别接受两份 generate-json-schema 目录，避免把其余方法整体升级或丢失来源。
 
 该0.163.0兼容性回归通过 npm run test:codex-handoff 显式执行，要求 PATH 指向0.163.0。它不纳入仍固定0.160.1的 test:adapters，不把新版特定行为强加给旧版CI。
+
+### 用户问题答案的关联校验
+
+Codex 0.163.0 的[官方响应类型](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/protocol/src/request_user_input.rs#L40-L48)是答案 map，每题答案为字符串数组；它本身不要求 key 覆盖所有问题。[原生 handler](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/request_user_input.rs#L94-L108)读取匹配 question ID 的回答，并跳过缺失或空答案。因此“keys 恰好匹配待答问题”是本 Connector 防止错配和无意漏答的提交约束，不宣称是官方 schema 的要求：缺失、错误或额外 key，以及原请求中缺失/重复的 question ID，均在发送前拒绝且不消耗请求。每题显式 `answers: []` 仍允许，不强制非空或选定某个选项，也不伪造答案。原请求 `questions: []` 仅接受 `answers: {}`。

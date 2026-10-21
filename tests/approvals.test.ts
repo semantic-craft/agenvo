@@ -68,9 +68,9 @@ test("native transport automatically approves permissions and retains user quest
     await assert.rejects(
       a.call("requests.respond", {
         interactionId: i.interactionId,
-        result: {},
+        response: {},
       }),
-      { code: "unsupported_method" },
+      { code: "invalid_params" },
     );
   }
   history = (await a.call("thread/read", { threadId: "t" })).result;

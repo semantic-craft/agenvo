@@ -9,6 +9,8 @@ import type { NativePacket } from "./connection.js";
 type Interaction = {
   interactionId: string;
   nativeId: string | number;
+  generation: string;
+  responseStatus?: "unknown";
   method: string;
   params: Record<string, any>;
 };
@@ -16,13 +18,24 @@ const listInput = z.strictObject({
   cursor: z.string().optional(),
   threadId: z.string().optional(),
 });
+const respondInput = z.strictObject({
+  interactionId: z.string(),
+  response: z.unknown(),
+});
 export const interactionMethods: Method[] = [
   {
     name: "requests.list",
     readOnly: true,
     description:
-      "List pending requests for user input and dynamic tool calls received on this connection. The user answers them in the native client; permission approvals are answered automatically.",
+      "List pending requests for user input and dynamic tool calls received on this connection. Reply explicitly with requests.respond using the returned responseSchema; permission approvals are answered automatically.",
     inputSchema: z.toJSONSchema(listInput),
+  },
+  {
+    name: "requests.respond",
+    readOnly: false,
+    description:
+      "Submit an explicit response to a current pending native user question or dynamic tool call. Validate against requests.list responseSchema. A submitted response is not confirmation of native completion; never retry an unknown send.",
+    inputSchema: z.toJSONSchema(respondInput),
   },
 ];
 /** Pending native requests belong to one connection generation. */
@@ -46,6 +59,23 @@ export class Interactions {
     return [...this.interactions.values()].some(
       (request) => request.params.threadId === threadId,
     );
+  }
+  responseThreadId(original: Record<string, unknown>): string {
+    const p = respondInput.parse(original);
+    const request = this.interactions.get(p.interactionId);
+    if (!request || request.generation !== this.generation())
+      throw new Fault(
+        "interaction_not_found",
+        "Pending request expired",
+        "rejected",
+      );
+    if (typeof request.params.threadId !== "string")
+      throw new Fault(
+        "invalid_params",
+        "Pending request has no thread identity",
+        "rejected",
+      );
+    return request.params.threadId;
   }
   receive(packet: NativePacket) {
     if (!packet.method) return;
@@ -100,12 +130,21 @@ export class Interactions {
       }
       // Another native client can handle requests this connector does not expose.
       if (!responseValidators.has(packet.method)) return;
+      // A repeated request on this connection must not reopen an uncertain send.
+      if (
+        [...this.interactions.values()].some(
+          (r) => r.nativeId === packet.id && r.generation === this.generation(),
+        )
+      )
+        return;
       for (const [id, r] of this.interactions)
         if (r.nativeId === packet.id) this.interactions.delete(id);
       this.recount();
-      const interactionId = this.generation() + ":" + randomUUID();
+      const generation = this.generation();
+      const interactionId = generation + ":" + randomUUID();
       const interaction: Interaction = {
         interactionId,
+        generation,
         nativeId: packet.id,
         method: packet.method,
         params: packet.params ?? {},
@@ -165,6 +204,67 @@ export class Interactions {
           p.cursor,
         ),
       );
+    }
+    if (method === "requests.respond") {
+      const p = respondInput.parse(original);
+      const request = this.interactions.get(p.interactionId);
+      if (!request || request.generation !== this.generation())
+        throw new Fault(
+          "interaction_not_found",
+          "Pending request expired or belongs to another connection",
+          "rejected",
+        );
+      if (request.responseStatus === "unknown")
+        throw new Fault(
+          "execution_unknown",
+          "Previous response send is unknown; inspect native state instead of retrying",
+          "unknown",
+        );
+      const validator = responseValidators.get(request.method);
+      if (!validator) throw new Fault("unsupported_method");
+      validate(validator, p.response);
+      if (request.method === "item/tool/requestUserInput") {
+        const questions = request.params.questions;
+        const keys = Object.keys(
+          (p.response as { answers: Record<string, unknown> }).answers,
+        );
+        if (
+          !Array.isArray(questions) ||
+          questions.some((q) => typeof q?.id !== "string") ||
+          new Set(questions.map((q) => q.id)).size !== questions.length ||
+          keys.length !== questions.length ||
+          questions.some((q) => !keys.includes(q.id))
+        )
+          throw new Fault(
+            "invalid_params",
+            "Answer keys must exactly match the pending question IDs; use an explicit empty answers array for an unanswered question",
+            "rejected",
+          );
+      }
+      // Mark before writing: a transport error can occur after bytes were accepted.
+      request.responseStatus = "unknown";
+      this.recount();
+      try {
+        this.write({
+          jsonrpc: "2.0",
+          id: request.nativeId,
+          result: p.response,
+        });
+      } catch {
+        throw new Fault(
+          "execution_unknown",
+          "Native response send could not be confirmed; do not replay",
+          "unknown",
+        );
+      }
+      this.interactions.delete(p.interactionId);
+      this.recount();
+      this.record(request.params.threadId, "interaction.submitted", {
+        interactionId: p.interactionId,
+        method: request.method,
+        threadId: request.params.threadId,
+      });
+      return accepted({ interactionId: p.interactionId, submitted: true });
     }
     throw new Fault("unsupported_method");
   }
