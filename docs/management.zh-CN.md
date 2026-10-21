@@ -26,7 +26,7 @@ Agenvo 只提供 `search` 和 `execute` 两个 MCP 工具。search 接受关键�
 
 deviceId 标识一个 Connector，不是一台物理机器。离线或无法查询的实例仍返回状态或错误；方法查询失败可能留下部分结果。没有匹配方法的在线实例不出现在非空查询结果中。名称在实例内唯一，不添加 Agenvo 命名空间。
 
-两种 Connector 使用共同的操作词：list、create、read、submit input、interrupt、respond。work context 在 Codex 中是 conversation thread，在 Herdr 中是 terminal pane 内运行的 agent；Herdr session 指原生服务进程，workspace 指终端容器。原生方法名和字段名保留，不把不同对象强行等同。
+两种 Connector 使用共同的操作词：list、create、read、submit input、interrupt。work context 在 Codex 中是 conversation thread，在 Herdr 中是 terminal pane 内运行的 agent；Herdr session 指原生服务进程，workspace 指终端容器。原生方法名和字段名保留，不把不同对象强行等同。
 
 发现结果还会原样携带配置者提供的可选 `context` 自由文本。选择和使用实例时先阅读它；空查询、匹配方法的查询和离线实例均可包含最近通告。上下文不参与方法关键词匹配，不是实时能力或权限保证，也不会自动传入原生调用。配置方式见[实例上下文](usage.zh-CN.md#补充实例上下文)。
 
@@ -107,7 +107,7 @@ return await call(target, "pane.read", {
 
 `notifications.list({threadId, cursor?, limit?})` 读取当前连接收到的有界通知，不是持久历史或所有会话的完整覆盖。resume 会话以订阅；resume 不重放历史输出。保存 nextCursor，在淘汰或重连后检查 gap。空会话、临时会话及某些原生版本可能不支持历史读取；历史可用时直接读取，通知用于获取已收到的输出。
 
-`requests.list({threadId?, cursor?})` 返回待回答问题和工具调用，包含原生参数与 responseSchema。可以在 execute 中筛选，再通过 `requests.respond({interactionId, result})` 回答。标识绑定当前连接，重复或过期回应失败。提交成功不证明你的回答赢得其他客户端的并发竞争。权限审批自动回答，不进入待回答列表。
+`requests.list({threadId?, cursor?})` 返回待回答问题和工具调用，包含原生参数与 responseSchema。由用户在原生客户端（如 Codex 桌面版）里回答；原生服务处理后条目自动消失。标识绑定当前连接。权限审批自动回答，不进入待回答列表。
 
 ## Herdr
 

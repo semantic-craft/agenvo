@@ -28,7 +28,7 @@ Queries are case-insensitive whitespace-separated keywords; all words must occur
 
 A deviceId identifies a Connector, not a physical machine. Offline or unavailable instances retain their status or error; a failed method lookup may leave partial results. Online instances without matching methods are omitted from nonempty searches. Names are unique within an instance; no Agenvo namespace is required.
 
-Both Connectors use common operation terms: list, create, read, submit input, interrupt and respond. A work context is a conversation thread in Codex and an agent running in a terminal pane in Herdr. A Herdr session is a native service process; a workspace is a terminal container. Native method and field names remain unchanged, preserving these differences.
+Both Connectors use common operation terms: list, create, read, submit input and interrupt. A work context is a conversation thread in Codex and an agent running in a terminal pane in Herdr. A Herdr session is a native service process; a workspace is a terminal container. Native method and field names remain unchanged, preserving these differences.
 
 Discovery results also carry the optional owner-supplied `context` text unchanged. Read it when choosing and using an instance. Empty queries, matching method queries, and offline instances can all include the last announcement. Context does not participate in method keyword matching, guarantee live capabilities or permissions, or automatically enter native calls. See [instance context configuration](usage.md#add-instance-context).
 
@@ -117,7 +117,7 @@ Use `thread/list`, `thread/start`, `thread/read`, `thread/resume`, `thread/archi
 
 `notifications.list({threadId, cursor?, limit?})` reads bounded events received on this connection. It is not durable history or guaranteed coverage of every thread. Resume a thread to subscribe; resume does not replay past output. Retain nextCursor and inspect gap after eviction or reconnection. Native history may be unavailable for empty or ephemeral threads or in some runtime versions. Use native history when available and notifications for received output.
 
-`requests.list({threadId?, cursor?})` returns pending user questions and tool calls, including their parameters and responseSchema. Select the desired entry inside execute, then answer with `requests.respond({interactionId, result})`. IDs are connection-scoped; expired or duplicate responses fail. Submission does not prove your answer won a race with another client. Permission approvals are automatic and do not enter this pending list.
+`requests.list({threadId?, cursor?})` returns pending user questions and tool calls, including their parameters and responseSchema. The user answers them in the native client (for example Codex Desktop); the entries disappear once the native server resolves them. IDs are connection-scoped. Permission approvals are automatic and do not enter this pending list.
 
 ## Herdr
 

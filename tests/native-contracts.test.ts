@@ -240,6 +240,7 @@ test("native Codex preserves notifications, questions, permissions, errors and e
   const call = async (m: string, p = {}) => (await a.call(m, p)).result as any;
   assert.ok(a.methods().every((m) => !m.name.startsWith("management.")));
   assert.ok(!a.methods().some((m) => m.name === "requests.read"));
+  assert.ok(!a.methods().some((m) => m.name === "requests.respond"));
   await assert.rejects(a.call("management.threads.list", {}), {
     code: "unsupported_method",
   });
@@ -277,20 +278,9 @@ test("native Codex preserves notifications, questions, permissions, errors and e
   await assert.rejects(
     a.call("requests.respond", {
       interactionId: request.interactionId,
-      result: { answers: { wrong: { answers: ["Alpha"] } } },
+      result: { answers: { label: { answers: ["Alpha"] } } },
     }),
-    { code: "invalid_params" },
-  );
-  await call("requests.respond", {
-    interactionId: request.interactionId,
-    result: { answers: { label: { answers: ["Alpha"] } } },
-  });
-  await assert.rejects(
-    a.call("requests.respond", {
-      interactionId: request.interactionId,
-      result: {},
-    }),
-    { code: "interaction_expired" },
+    { code: "unsupported_method" },
   );
   await assert.rejects(
     a.call("thread/turns/list", { threadId: "t", itemsView: "full" }),
@@ -316,9 +306,7 @@ test("native Codex preserves notifications, questions, permissions, errors and e
   );
   const native = await call("thread/read", { threadId: "t" });
   assert.ok(
-    native.responses.some(
-      (r: any) => r.result?.answers?.label?.answers[0] === "Alpha",
-    ),
+    !native.responses.some((r: any) => r.result?.answers !== undefined),
   );
   const starts = native.calls.filter((c: any) => c.method === "turn/start");
   assert.equal(starts.length, 1);

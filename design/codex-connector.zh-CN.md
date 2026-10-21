@@ -4,13 +4,13 @@ Codex Connector 暴露原生 thread/turn 能力，以及连接通知和服务端
 
 ## 连接与执行
 
-Connector 仅通过 Unix socket 或 loopback WebSocket 连接独立运行的 app-server，不启动或终止原生进程。Connector 的关闭、更新和重启不停止服务或轮次。配置只记录已有 home、默认工作目录与端点，不创建 Codex home；初始化核对原生 `codexHome`，版本取自 `initialize.userAgent`。Windows 使用 loopback WebSocket。创建、恢复和输入路径应用 full access / never，自动回答执行权限请求；用户问题和动态工具调用仍需调用者提供内容。
+Connector 仅通过 Unix socket 或 loopback WebSocket 连接独立运行的 app-server，不启动或终止原生进程。Connector 的关闭、更新和重启不停止服务或轮次。配置只记录已有 home、默认工作目录与端点，不创建 Codex home；初始化核对原生 `codexHome`，版本取自 `initialize.userAgent`。Windows 使用 loopback WebSocket。创建、恢复和输入路径应用 full access / never，自动回答执行权限请求；用户问题和动态工具调用由用户在原生客户端回答，Connector 经 `requests.list` 列出待响应条目。
 
 方法保留原生名称及 threadId、turnId。`thread/start` 创建工作上下文，`turn/start` 提交输入；未加载会话可能需要先 resume。列表过滤决定 provider/source 覆盖范围，不将当前加载集合解释为全部持久会话。
 
 ## 请求与通知桥接
 
-服务端主动发来的请求不是普通 RPC 调用。`requests.list` 返回完整待响应请求、参数和 responseSchema，`requests.respond` 提交回答，不需要单独的 read 方法。请求标识绑定当前连接，重复或过期回应明确失败；提交成功不保证赢得与其他客户端的回应竞争。自动处理的权限审批不进入待回答列表。
+服务端主动发来的请求不是普通 RPC 调用。`requests.list` 返回完整待响应请求、参数和 responseSchema，供调用者查看；回答由用户在原生客户端完成，Connector 不提供回答方法，原生服务处理后条目随 `serverRequest/resolved`、`item/completed` 或轮次结束清除。请求标识绑定当前连接。自动处理的权限审批不进入待回答列表。
 
 `notifications.list` 返回当前连接已收到的有界原生通知，按 threadId 和 cursor 读取并报告 gap。resume 会话以订阅，但不重放过去输出；未订阅、断线或淘汰会造成缺口。它不提供持久历史或全实例日志。原生历史可用时直接读取；待响应请求独立保存，不能从可淘汰事件日志推导。
 
@@ -41,7 +41,7 @@ Connector 仅通过 Unix socket 或 loopback WebSocket 连接独立运行的 app
 
 协议测试覆盖自动权限响应、用户交互、多客户端请求失效、断线后恢复订阅且不重放输入，以及 home 身份与 Unix 目录权限检查。配置和 doctor 测试检查缺失服务保持不可用且不创建 home。Windows 使用同一 WebSocket 路径；Unix socket 测试只适用于 macOS/Linux。
 
-重构前的 `66aa871d17b1d912e709f4870fe75d9d09a84074` 使用隔离 Codex 0.160.1 和本地模型 mock 验证：禁用统一 management 方法后，创建、发现、读取模型输出、steer、拒绝错误 turnId、interrupt、归档和恢复仍能完成。协议 fixture 证明 `requests.list` 已包含原 `requests.read` 的完整条目，list 后直接 respond 可以回答，重复回应失败。
+重构前的 `66aa871d17b1d912e709f4870fe75d9d09a84074` 使用隔离 Codex 0.160.1 和本地模型 mock 验证：禁用统一 management 方法后，创建、发现、读取模型输出、steer、拒绝错误 turnId、interrupt、归档和恢复仍能完成。协议 fixture 证明 `requests.list` 已包含原 `requests.read` 的完整条目。
 
 原生历史不可读时，移除连接通知日志会丢失已收到的输出；事件淘汰后，未响应请求仍需保留。这支持删除统一公共包装及多余读取接口，同时保留通知记录和独立请求集合。初次探针有一次未定位的原生错误，后续通过不构成稳定性证明；这些历史实验不能代替变更后的真实 MCP 入口验证。
 

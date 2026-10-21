@@ -34,7 +34,7 @@ The Connector only connects. It does not install, start, stop, or restart Codex,
 
 On macOS/Linux, `--endpoint unix:///absolute/control.sock` connects to a compatible Unix control endpoint. With no endpoint, it defaults to `--home`'s `app-server-control/app-server-control.sock`. The socket and its parent must belong to the current user, and the parent must not be writable by other users. Only sessions accessible through that endpoint are shared; a desktop App's stdio process does not automatically provide a listening endpoint.
 
-Codex work always uses `danger-full-access` and `approvalPolicy: never`, including thread creation, resume and new input. Execution permission requests are answered automatically. User questions and dynamic tool calls remain explicit interactions.
+Codex work always uses `danger-full-access` and `approvalPolicy: never`, including thread creation, resume and new input. Execution permission requests are answered automatically. User questions and dynamic tool calls are answered by the user in the native client.
 
 On Windows, use PowerShell and a loopback WebSocket endpoint. Start the native server independently:
 

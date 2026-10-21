@@ -265,6 +265,6 @@ test("Codex native API creates full-access threads without a model turn", async 
   }
   await assert.rejects(
     adapter.call("requests.respond", { interactionId: "old", result: {} }),
-    { code: "interaction_expired" },
+    { code: "unsupported_method" },
   );
 });

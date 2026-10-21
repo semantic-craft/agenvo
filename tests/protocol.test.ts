@@ -4,7 +4,6 @@ import { bytes, page, LIMITS, canonical, readBody } from "@agenvo/protocol";
 import {
   executionParams,
   automaticApproval,
-  validateAnswers,
 } from "../apps/codex-app-server/src/codex-execution.js";
 import { instanceConfigSchema } from "./support/config.js";
 import { bounded } from "@agenvo/connector/adapters/adapter";
@@ -85,18 +84,4 @@ test("permission requests are automatic while user answers remain structured", (
     },
   );
   assert.equal(automaticApproval("item/tool/requestUserInput", {}), undefined);
-  assert.throws(
-    () =>
-      validateAnswers(
-        "item/tool/requestUserInput",
-        { questions: [{ id: "q" }] },
-        { answers: { wrong: { answers: ["yes"] } } },
-      ),
-    { code: "invalid_params" },
-  );
-  validateAnswers(
-    "item/tool/requestUserInput",
-    { questions: [{ id: "q" }] },
-    { answers: { q: { answers: ["yes"] } } },
-  );
 });
