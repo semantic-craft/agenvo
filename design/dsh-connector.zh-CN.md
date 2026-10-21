@@ -42,6 +42,8 @@ DSH 桌面版的 Host 运行在 Electron 进程里，认证由桌面载体负责
 
 原生 `session/list` 一次返回全部行，`cursor` 参数保留未用；每行带完整投影（token 用量、上下文占用等）。一台机器上 84 个会话即达 75 KB，超过 64 KiB 帧上限。因此 Connector 在原生参数 `_request` 之外接受桥接参数 `limit`（默认 20）、`offset`（默认 0）和 `projections`（保留的投影键，默认 title、permissions、inbox、userQuestions、todos、goal、sessionListMetadata），返回 `{items, total, nextOffset}`。行仍是原生行，只裁掉未选的投影键；按活动排序，翻页之间可能移动。单个会话的全部投影用 `session/projections` 读。
 
+`session/follow` 和 `session/page` 的每条 `assistant/message` 记录同时携带回答文本 `message.content[]` 和过程本地呈现分片 `data.stream[]`（含推理块）。长回答即使 `maxMessages: 1` 也可能因此超过 64 KiB。Connector 在 `bounded()` 之前把记录里的 `data.stream` 去掉，回答文本保留在 `message.content`；需要分片时，传原生选项 `request.assistantStream: true`（follow 原样转发），或传 Connector 桥接顶层参数 `assistantStream: true`（follow 与 page 都接受，转发给原生端点前去掉这个顶层键，因为原生顶层 `additionalProperties: false`）。
+
 `accepted` 只说明原生端点接受了调用。`session/prompt` 返回 `{accepted: true}` 表示输入已进入会话，不表示推理开始、完成或业务目标达成；以 `turn/end` 事件和历史为准。
 
 ### Full access

@@ -210,23 +210,33 @@ export class DshAdapter implements Adapter {
       );
     if (!this.available || this.stopped) throw new Fault("runtime_unavailable");
     const request = (params.request ?? {}) as Item;
+    // Connector bridge: records carry the answer text in message.content; the duplicated
+    // process-local streaming frames (data.stream) are kept only when the caller asks for them.
+    const keepStream =
+      request.assistantStream === true || params.assistantStream === true;
+    // Native top-level schemas reject extra keys (additionalProperties: false); drop the
+    // bridge key before forwarding so it never reaches the native endpoint.
+    const { assistantStream: _assistantStream, ...nativeParams } = params;
     let sessionId: string | undefined =
       request.sessionId ??
       request.address?.sessionId ??
       (params.agentId as string | undefined);
     try {
       let result: unknown;
-      if (name === "session/follow") result = await this.snapshot(params);
+      if (name === "session/follow") result = await this.snapshot(nativeParams);
       else if (name === "session/list") result = await this.list(params);
       else if (name === "session/create") {
-        result = await this.invoke(name, params, true);
+        result = await this.invoke(name, nativeParams, true);
         sessionId = (result as Item).sessionId;
         await this.fullAccess(sessionId!);
       } else if (name === "session/prompt") {
         await this.fullAccess(sessionId!);
-        result = await this.invoke(name, params, true);
+        result = await this.invoke(name, nativeParams, true);
         this.follow(sessionId!);
-      } else result = await this.invoke(name, params, !operation.readOnly);
+      } else
+        result = await this.invoke(name, nativeParams, !operation.readOnly);
+      if ((name === "session/follow" || name === "session/page") && !keepStream)
+        result = withoutStreamFrames(result as Item);
       if (name === "session/fork")
         sessionId = (result as Item)?.sessionId ?? sessionId;
       return bounded({
@@ -417,6 +427,20 @@ export class DshAdapter implements Adapter {
 function wakes(event: Item) {
   if (!WAKE.test(String(event.type))) return false;
   return event.type !== "user/message" || event.data?.source?.kind === "user";
+}
+
+// Records carry the answer text in message.content; the process-local streaming frames in
+// data.stream duplicate it and can push a follow or page result past the 64 KiB frame. Drop
+// them unless the caller asked for assistantStream.
+function withoutStreamFrames(result: Item): Item {
+  const records = result?.records;
+  if (!Array.isArray(records)) return result;
+  for (const record of records) {
+    const data = record?.event?.data;
+    if (data && typeof data === "object" && "stream" in data)
+      delete data.stream;
+  }
+  return result;
 }
 
 // Keep the native event; replace oversized data (images, long messages) with a pointer to session/page.
