@@ -14,6 +14,7 @@ import { socketTempDir, until } from "./support/environment.js";
 async function desktop(socket: string) {
   const calls: { endpoint: string; args: any }[] = [];
   const sessions = new Map<string, { preset: string; seq: number }>();
+  const durable = new Map<string, any[]>();
   const control = new Set<http.ServerResponse>();
   const follows = new Map<string, Set<http.ServerResponse>>();
   let dropNext = "";
@@ -85,7 +86,10 @@ async function desktop(socket: string) {
       const s = sessions.get(request.address.sessionId)!;
       if (request.throughSeq > s.seq)
         throw { code: "gateway/bad-request", message: "past cursor" };
-      return { records: [], hasMore: false };
+      return {
+        records: durable.get(request.address.sessionId) ?? [],
+        hasMore: false,
+      };
     },
   };
   const server = http.createServer(async (req, res) => {
@@ -121,10 +125,13 @@ async function desktop(socket: string) {
     }
     const id = args.request.address.sessionId;
     const s = sessions.get(id)!;
+    const recs = durable.get(id) ?? [];
     frame(res, {
       type: "snapshot",
       cursor: s.seq,
-      records: [{ type: "event", event: { type: "turn/end", seq: s.seq } }],
+      records: recs.length
+        ? recs
+        : [{ type: "event", event: { type: "turn/end", seq: s.seq } }],
     });
     if (!follows.has(id)) follows.set(id, new Set());
     follows.get(id)!.add(res);
@@ -135,6 +142,12 @@ async function desktop(socket: string) {
   return {
     calls,
     sessions,
+    durable,
+    seed: (sessionId: string, event: any) => {
+      const list = durable.get(sessionId) ?? [];
+      list.push({ type: "event", event });
+      durable.set(sessionId, list);
+    },
     append,
     drop: (endpoint: string) => (dropNext = endpoint),
     disconnect: () => {
@@ -199,7 +212,7 @@ test("dsh connector manages desktop sessions through native endpoints", async (t
     },
   );
 
-  // A session the user opened by hand keeps its preset until input is submitted.
+  // A session the user opened by hand keeps its preset; listing does not switch it.
   native.sessions.set("session-user", { preset: "workspace-write", seq: 5 });
   const listed = await adapter.call("session/list", { _request: {} });
   assert.ok(
@@ -233,16 +246,61 @@ test("dsh connector manages desktop sessions through native endpoints", async (t
   assert.equal(last.result.nextOffset, undefined);
   assert.ok(last.result.items[0].projections.values.tokenUsage);
   for (let n = 0; n < 60; n++) native.sessions.delete(`session-old-${n}`);
+
+  // Create with a permission bridge key runs exactly that /permission, never full access.
+  const ro = await adapter.call("session/create", {
+    request: { cwd: "/work/koe" },
+    permission: "read-only",
+  });
+  assert.equal(ro.execution, "accepted");
+  const roId = ro.nativeIds!.sessionId;
+  assert.equal(native.sessions.get(roId)!.preset, "read-only");
+  const roExecutes = native.calls.filter(
+    (c) => c.endpoint === "commands/execute" && c.args.agentId === roId,
+  );
+  assert.equal(roExecutes.length, 1);
+  assert.equal(roExecutes[0].args.line, "/permission read-only");
+  assert.ok(
+    !native.calls.some(
+      (c) =>
+        c.endpoint === "commands/execute" &&
+        c.args.agentId === roId &&
+        c.args.line === "/permission danger-full-access",
+    ),
+  );
+  // The bridge key is consumed by the Connector and never forwarded to native session/create.
+  const createArgs = native.calls
+    .filter((c) => c.endpoint === "session/create")
+    .at(-1)!.args;
+  assert.equal("permission" in createArgs, false);
+
   const executes = () =>
     native.calls.filter((c) => c.endpoint === "commands/execute").length;
   const before = executes();
-  const prompted = await adapter.call("session/prompt", {
+
+  // Prompt without a permission bridge key runs no /permission and keeps the session's preset.
+  const promptedRo = await adapter.call("session/prompt", {
     request: {
       requestId: "r1",
-      sessionId: "session-user",
+      sessionId: roId,
       mode: "queue",
       content: [{ type: "text", text: "只读：说明项目" }],
     },
+  });
+  assert.equal(promptedRo.execution, "accepted");
+  assert.deepEqual(promptedRo.nativeIds, { sessionId: roId });
+  assert.equal(native.sessions.get(roId)!.preset, "read-only");
+  assert.equal(executes(), before);
+
+  // Prompt with a permission bridge key switches the session first, then submits.
+  const prompted = await adapter.call("session/prompt", {
+    request: {
+      requestId: "r2",
+      sessionId: "session-user",
+      mode: "queue",
+      content: [{ type: "text", text: "写：说明项目" }],
+    },
+    permission: "danger-full-access",
   });
   assert.equal(prompted.execution, "accepted");
   assert.deepEqual(prompted.nativeIds, { sessionId: "session-user" });
@@ -251,15 +309,25 @@ test("dsh connector manages desktop sessions through native endpoints", async (t
     "danger-full-access",
   );
   assert.equal(executes(), before + 1);
-  // Already full access: no second /permission run.
+  // The bridge key is consumed by the Connector and never forwarded to native session/prompt.
+  const promptArgs = native.calls
+    .filter((c) => c.endpoint === "session/prompt")
+    .at(-1)!.args;
+  assert.equal("permission" in promptArgs, false);
+
+  // A prompt without permission on the now-full-access session leaves it unchanged and runs no /permission.
   await adapter.call("session/prompt", {
     request: {
-      requestId: "r2",
+      requestId: "r5",
       sessionId: "session-user",
       mode: "queue",
       content: [{ type: "text", text: "again" }],
     },
   });
+  assert.equal(
+    native.sessions.get("session-user")!.preset,
+    "danger-full-access",
+  );
   assert.equal(executes(), before + 1);
 
   // Durable follow events wake the caller; DSH's own context injections and assistant output do not.
@@ -352,4 +420,130 @@ test("dsh connector manages desktop sessions through native endpoints", async (t
   assert.ok(
     events.filter((e) => e.native?.reason === "native_connected").length >= 2,
   );
+});
+
+test("dsh connector reads output without duplicate assistant stream frames", async (t) => {
+  const dir = await mkdtemp(join(socketTempDir(), "agenvo-dsh-stream-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const socket = join(dir, "native.sock");
+  const native = await desktop(socket);
+  t.after(native.close);
+  const adapter = new DshAdapter(
+    instanceConfigSchema.parse({
+      id: "dsh-stream",
+      label: "DSH stream",
+      kind: "dsh",
+      endpoint: "unix://" + socket,
+    }),
+  );
+  t.after(() => adapter.close());
+  await adapter.init();
+
+  // A durable assistant/message whose answer text lives in message.content and whose
+  // duplicated streaming frames in data.stream would push the record past 64 KiB.
+  const content = "c".repeat(20 * 1024); // ~20 KiB of answer text
+  const seed = (sessionId: string, seq: number, streamBytes: number) => {
+    native.sessions.set(sessionId, { preset: "danger-full-access", seq });
+    native.seed(sessionId, {
+      type: "assistant/message",
+      seq,
+      time: Date.now(),
+      data: {
+        turn: { id: "t1" },
+        step: { id: "s1" },
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: content }],
+          source: { kind: "assistant" },
+          id: "m1",
+        },
+        usage: {},
+        stream: [
+          {
+            type: "chunk",
+            time: Date.now(),
+            chunk: { type: "text", text: "s".repeat(streamBytes) },
+          },
+        ],
+      },
+    });
+  };
+  const record = (outcome: any) => outcome.result.records[0].event;
+
+  // Default follow omits data.stream and keeps the answer text, so the snapshot fits the frame.
+  const sessionId = "session-big";
+  seed(sessionId, 2, 50 * 1024);
+  const follow = await adapter.call("session/follow", {
+    request: { address: { kind: "session", sessionId }, maxMessages: 1 },
+  });
+  assert.equal(follow.execution, "accepted");
+  assert.equal(follow.error, undefined);
+  assert.equal(record(follow).data.stream, undefined);
+  assert.equal(record(follow).data.message.content[0].text, content);
+
+  // Default page omits data.stream the same way.
+  const page = await adapter.call("session/page", {
+    request: {
+      address: { kind: "session", sessionId },
+      throughSeq: 2,
+      beforeSeq: 3,
+      maxMessages: 1,
+    },
+  });
+  assert.equal(page.execution, "accepted");
+  assert.equal(page.error, undefined);
+  assert.equal(record(page).data.stream, undefined);
+  assert.equal(record(page).data.message.content[0].text, content);
+
+  // assistantStream: true keeps data.stream; use a smaller stream so the kept record still fits.
+  const keepId = "session-keep";
+  seed(keepId, 2, 20 * 1024);
+
+  // The connector bridge top-level assistantStream keeps data.stream and is not forwarded.
+  const followBridge = await adapter.call("session/follow", {
+    request: {
+      address: { kind: "session", sessionId: keepId },
+      maxMessages: 1,
+    },
+    assistantStream: true,
+  });
+  assert.equal(followBridge.execution, "accepted");
+  assert.equal(followBridge.error, undefined);
+  assert.ok(Array.isArray(record(followBridge).data.stream));
+  assert.equal(record(followBridge).data.message.content[0].text, content);
+  const followArgs = native.calls
+    .filter((c) => c.endpoint === "session/follow")
+    .at(-1)!.args;
+  assert.equal("assistantStream" in followArgs, false);
+
+  const pageBridge = await adapter.call("session/page", {
+    request: {
+      address: { kind: "session", sessionId: keepId },
+      throughSeq: 2,
+      maxMessages: 1,
+    },
+    assistantStream: true,
+  });
+  assert.equal(pageBridge.execution, "accepted");
+  assert.equal(pageBridge.error, undefined);
+  assert.ok(Array.isArray(record(pageBridge).data.stream));
+  const pageArgs = native.calls
+    .filter((c) => c.endpoint === "session/page")
+    .at(-1)!.args;
+  assert.equal("assistantStream" in pageArgs, false);
+
+  // The native request option assistantStream: true is forwarded as-is and keeps data.stream.
+  const followRequest = await adapter.call("session/follow", {
+    request: {
+      address: { kind: "session", sessionId: keepId },
+      maxMessages: 1,
+      assistantStream: true,
+    },
+  });
+  assert.equal(followRequest.execution, "accepted");
+  assert.ok(Array.isArray(record(followRequest).data.stream));
+  const requestArgs = native.calls
+    .filter((c) => c.endpoint === "session/follow")
+    .at(-1)!.args;
+  assert.equal(requestArgs.request.assistantStream, true);
 });

@@ -19,5 +19,11 @@ agenvo-dsh service install
 
 Methods keep DSH's native endpoint names and named arguments (`session/list`, `session/follow`,
 `session/page`, `workspace/create`, `session/create`, `session/prompt`, `session/cancel`,
-`userQuestions/answer`, ...). `session/create` and `session/prompt` switch the session to the native
-`danger-full-access` permission preset first when it differs; declare that in the instance `context`.
+`userQuestions/answer`, ...). `session/create` sets the session to the native `/permission` preset
+`permission` when you pass one, otherwise `danger-full-access`; `session/prompt` switches the session
+to `permission` before submitting when you pass one, and otherwise leaves the session's current
+permission unchanged (presets: `read-only`, `workspace-write`, `danger-full-access`). Declare the
+execution convention in the instance `context`.
+`session/follow` and `session/page` keep each `assistant/message` record's answer text in
+`message.content`; the duplicated streaming frames (`data.stream`) are included only when you pass
+`assistantStream: true`.

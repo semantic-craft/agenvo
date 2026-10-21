@@ -42,11 +42,18 @@ DSH 桌面版的 Host 运行在 Electron 进程里，认证由桌面载体负责
 
 原生 `session/list` 一次返回全部行，`cursor` 参数保留未用；每行带完整投影（token 用量、上下文占用等）。一台机器上 84 个会话即达 75 KB，超过 64 KiB 帧上限。因此 Connector 在原生参数 `_request` 之外接受桥接参数 `limit`（默认 20）、`offset`（默认 0）和 `projections`（保留的投影键，默认 title、permissions、inbox、userQuestions、todos、goal、sessionListMetadata），返回 `{items, total, nextOffset}`。行仍是原生行，只裁掉未选的投影键；按活动排序，翻页之间可能移动。单个会话的全部投影用 `session/projections` 读。
 
+`session/follow` 和 `session/page` 的每条 `assistant/message` 记录同时携带回答文本 `message.content[]` 和过程本地呈现分片 `data.stream[]`（含推理块）。长回答即使 `maxMessages: 1` 也可能因此超过 64 KiB。Connector 在 `bounded()` 之前把记录里的 `data.stream` 去掉，回答文本保留在 `message.content`；需要分片时，传原生选项 `request.assistantStream: true`（follow 原样转发），或传 Connector 桥接顶层参数 `assistantStream: true`（follow 与 page 都接受，转发给原生端点前去掉这个顶层键，因为原生顶层 `additionalProperties: false`）。
+
 `accepted` 只说明原生端点接受了调用。`session/prompt` 返回 `{accepted: true}` 表示输入已进入会话，不表示推理开始、完成或业务目标达成；以 `turn/end` 事件和历史为准。
 
-### Full access
+### 权限预设
 
-执行约定由实例 `context` 声明。`session/create` 之后、`session/prompt` 之前，Connector 读取 `session/projections` 的 `permissions.currentValue`，不是 `danger-full-access` 时经原生 `commands/execute` 运行 `/permission danger-full-access`（沙箱 full access、审批 `never`）。这与桌面里切换权限是同一条原生路径：DSH 会在会话里记录策略变化，并向模型注入一条变化通知。已是 full access 时不重复执行。准备步骤与输入不是事务：输入失败时权限切换可能已经生效。审批策略为 `never`，所以不会产生需要回答的审批请求；agent 向用户提的问题仍由调用者用 `userQuestions/answer` 明确回答。
+执行约定由实例 `context` 声明。会话的权限预设由原生服务持有：`session/create` 和 `session/prompt` 接受 Connector 桥接顶层参数 `permission`（原生 `/permission` 预设名，可用 `read-only`、`workspace-write`、`danger-full-access`）。
+
+- `session/create`：创建后把会话切到 `permission`；没传时切到 `danger-full-access`（编码会话默认不变）。
+- `session/prompt`：传了 `permission` 时在提交前把会话切到该值；没传时保持会话当前权限，不做任何切换，已有会话的设置仍由原生服务持有。
+
+切换与桌面里切换权限是同一条原生路径：Connector 先读 `session/projections` 的 `permissions.currentValue`，与目标不同才经原生 `commands/execute` 运行 `/permission <preset>`，相同则不重复执行；DSH 会在会话里记录策略变化，并向模型注入一条变化通知。准备步骤与输入不是事务：输入失败时权限切换可能已经生效。审批策略由原生预设决定（`danger-full-access` 为 `never`，不会产生需要回答的审批请求）；agent 向用户提的问题仍由调用者用 `userQuestions/answer` 明确回答。
 
 ### 结果与错误
 
@@ -62,7 +69,7 @@ Connector 常开一条原生 `session/control` 流。它对每个有活动 agent
 
 接口基线为 DSH 桌面版 `0.2.1-rc.2`，仅用于复现，不是版本白名单。
 
-- `tests/dsh.test.ts`：按插件桥接契约实现的 Unix socket fixture。覆盖共同术语发现、create 与 prompt 前的 full access（已是 full access 时不重复）、列出用户会话、follow 快照与 page、原生拒绝、参数 schema 拒绝、写响应丢失报告 `unknown` 且不重试、事件过滤，以及观察流断开后的 resync 与重连。
+- `tests/dsh.test.ts`：按插件桥接契约实现的 Unix socket fixture。覆盖共同术语发现、create 与 prompt 的权限预设（create 默认 `danger-full-access`，传 `permission` 时只执行一次对应 `/permission`；prompt 不传 `permission` 不切换，传则先切再提交；已是目标值时不重复）、列出用户会话、follow 快照与 page、原生拒绝、参数 schema 拒绝、写响应丢失报告 `unknown` 且不重试、事件过滤，以及观察流断开后的 resync 与重连。
 - 隔离的真实 DSH：临时 `DSH_HOME` 与 `HOME` 下 `dsh web` 加载桥接插件，Connector 实测 `session/list`、`workspace/create`、`session/create`（随后为 `danger-full-access`）、`session/prompt`、`session/follow`、`session/page`、未知会话的 `session/not-found` 拒绝、`session/cancel`，以及 `turn/start`、`user/message`、`turn/end` 事件。没有模型凭据，turn 以原生错误结束，这不影响连接与事件路径的验证。
 - 插件侧测试在 dsh-grokbot-dispatch 的 `test/native-bridge.test.js`。
 
