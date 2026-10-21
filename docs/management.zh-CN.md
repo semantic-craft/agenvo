@@ -158,3 +158,5 @@ Lody 通过 `lody.*` 方法暴露原生 Session、历史、精确轮次取消和
 Connector 不再因事件订阅自动 resume 所有 loaded threads。只有明确 start/resume 的 thread 收到事件，网络重连只恢复这些目标。退订开始发送前移除恢复目标；确认丢失或原生拒绝后也不会自动重新抢回，需显式 resume 才恢复事件覆盖。重启 Connector 后同样需要显式 resume，不能依赖实例级订阅发现全部会话。退订后直接 turn/start 会返回 thread_not_subscribed。
 
 需要即时、多客户端续接时，客户端必须连接同一原生 app-server，并确认其事件/交互协议兼容。共用 CODEX_HOME 仅共享历史，不能代替共享运行时。若桌面版本没有受支持的共用服务入口，只能保留单一写入客户端，或等待原生卸载后再接管；本 Connector 不宣称能即时释放其他服务的 writer。
+
+回复用户问题时，`response.answers` 的 key 必须恰好对应原请求所有 `questions[].id`；这是 Connector 的防错校验。可为不作答的题显式提供 `{answers: []}`，不应省略或编造答案。错误 key 或缺题会在发送前拒绝，原请求仍可修正后回答。

@@ -206,6 +206,24 @@ export class Interactions {
       const validator = responseValidators.get(request.method);
       if (!validator) throw new Fault("unsupported_method");
       validate(validator, p.response);
+      if (request.method === "item/tool/requestUserInput") {
+        const questions = request.params.questions;
+        const keys = Object.keys(
+          (p.response as { answers: Record<string, unknown> }).answers,
+        );
+        if (
+          !Array.isArray(questions) ||
+          questions.some((q) => typeof q?.id !== "string") ||
+          new Set(questions.map((q) => q.id)).size !== questions.length ||
+          keys.length !== questions.length ||
+          questions.some((q) => !keys.includes(q.id))
+        )
+          throw new Fault(
+            "invalid_params",
+            "Answer keys must exactly match the pending question IDs; use an explicit empty answers array for an unanswered question",
+            "rejected",
+          );
+      }
       // Mark before writing: a transport error can occur after bytes were accepted.
       request.responseStatus = "unknown";
       this.recount();

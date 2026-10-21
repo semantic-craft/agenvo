@@ -70,3 +70,7 @@ codex app-server generate-json-schema --experimental --out /tmp/agenvo-codex-sch
 schema 基线保留 0.160.1；新增 thread/unsubscribe 单独标注 0.163.0 来源。导入脚本分别接受两份 generate-json-schema 目录，避免把其余方法整体升级或丢失来源。
 
 该0.163.0兼容性回归通过 npm run test:codex-handoff 显式执行，要求 PATH 指向0.163.0。它不纳入仍固定0.160.1的 test:adapters，不把新版特定行为强加给旧版CI。
+
+### 用户问题答案的关联校验
+
+Codex 0.163.0 的[官方响应类型](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/protocol/src/request_user_input.rs#L40-L48)是答案 map，每题答案为字符串数组；它本身不要求 key 覆盖所有问题。[原生 handler](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/request_user_input.rs#L94-L108)读取匹配 question ID 的回答，并跳过缺失或空答案。因此“keys 恰好匹配待答问题”是本 Connector 防止错配和无意漏答的提交约束，不宣称是官方 schema 的要求：缺失、错误或额外 key，以及原请求中缺失/重复的 question ID，均在发送前拒绝且不消耗请求。每题显式 `answers: []` 仍允许，不强制非空或选定某个选项，也不伪造答案。原请求 `questions: []` 仅接受 `answers: {}`。
