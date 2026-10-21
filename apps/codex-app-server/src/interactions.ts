@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { bytes, Fault, LIMITS, page, type Outcome } from "@agenvo/protocol";
 import { accepted, type Method } from "@agenvo/connector/adapters/adapter";
-import { automaticApproval, validateAnswers } from "./codex-execution.js";
+import { automaticApproval } from "./codex-execution.js";
 import { responseValidators, validate } from "./native-schema.js";
 import schemas from "./schema/codex.json";
 import type { NativePacket } from "./connection.js";
@@ -16,24 +16,13 @@ const listInput = z.strictObject({
   cursor: z.string().optional(),
   threadId: z.string().optional(),
 });
-const respondInput = z.strictObject({
-  interactionId: z.string(),
-  result: z.record(z.string(), z.unknown()),
-});
 export const interactionMethods: Method[] = [
   {
     name: "requests.list",
     readOnly: true,
     description:
-      "List pending requests for user input and dynamic tool calls received on this connection. Permission approvals are answered automatically.",
+      "List pending requests for user input and dynamic tool calls received on this connection. The user answers them in the native client; permission approvals are answered automatically.",
     inputSchema: z.toJSONSchema(listInput),
-  },
-  {
-    name: "requests.respond",
-    readOnly: false,
-    description:
-      "Respond to a pending request for user input or a dynamic tool call. Native response schemas are included in requests.list.",
-    inputSchema: z.toJSONSchema(respondInput),
   },
 ];
 /** Pending native requests belong to one connection generation. */
@@ -171,26 +160,6 @@ export class Interactions {
           p.cursor,
         ),
       );
-    }
-    if (method === "requests.respond") {
-      const p = respondInput.parse(original);
-      const interaction = this.interactions.get(p.interactionId);
-      if (!interaction) throw new Fault("interaction_expired");
-      validate(responseValidators.get(interaction.method)!, p.result);
-      validateAnswers(interaction.method, interaction.params, p.result);
-      this.interactions.delete(p.interactionId);
-      this.recount();
-      this.write({
-        jsonrpc: "2.0",
-        id: interaction.nativeId,
-        result: p.result,
-      });
-      return accepted({
-        interactionId: p.interactionId,
-        submitted: true,
-        resolution: "unconfirmed",
-        note: "The native server arbitrates concurrent answers. Inspect native turn/item state; submission is not proof this answer won.",
-      });
     }
     throw new Fault("unsupported_method");
   }

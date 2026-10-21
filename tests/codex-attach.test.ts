@@ -152,12 +152,9 @@ for (const mode of ["unix", "websocket"])
         },
       });
       await barrier();
-      await assert.rejects(
-        adapter.call("requests.respond", {
-          interactionId: first.items[0].interactionId,
-          result: { success: true, contentItems: [] },
-        }),
-        { code: "interaction_expired" },
+      assert.equal(
+        ((await adapter.call("requests.list", {})).result as any).items.length,
+        0,
       );
       send({
         id: "local-only",
