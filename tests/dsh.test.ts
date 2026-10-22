@@ -12,7 +12,13 @@ import { socketTempDir, until } from "./support/environment.js";
 // Same wire contract as the native bridge in the dsh-grokbot-dispatch desktop plugin:
 // POST /api/<endpoint> {args} -> {ok, value|error}; POST /stream/<endpoint> {args} -> NDJSON {item}.
 async function desktop(socket: string) {
-  const calls: { endpoint: string; args: any }[] = [];
+  let bridgeReply = { status: 404, body: { error: "not found" } as unknown };
+  const calls: {
+    endpoint: string;
+    args: any;
+    carrier: string;
+    method?: string;
+  }[] = [];
   const sessions = new Map<string, { preset: string; seq: number }>();
   const durable = new Map<string, any[]>();
   const control = new Set<http.ServerResponse>();
@@ -102,10 +108,14 @@ async function desktop(socket: string) {
     const [, carrier, ...rest] = req.url!.split("/");
     const endpoint = rest.join("/");
     const { args } = JSON.parse(raw);
-    calls.push({ endpoint, args });
+    calls.push({ endpoint, args, carrier, method: req.method });
     if (dropNext === endpoint) {
       dropNext = "";
       return req.socket.destroy();
+    }
+    if (carrier === "bridge") {
+      res.writeHead(bridgeReply.status, { "content-type": "application/json" });
+      return res.end(JSON.stringify(bridgeReply.body));
     }
     if (carrier === "api") {
       res.writeHead(200, { "content-type": "application/json" });
@@ -141,6 +151,7 @@ async function desktop(socket: string) {
   await once(server, "listening");
   return {
     calls,
+    reply: (status: number, body: unknown) => (bridgeReply = { status, body }),
     sessions,
     durable,
     seed: (sessionId: string, event: any) => {
@@ -546,4 +557,120 @@ test("dsh connector reads output without duplicate assistant stream frames", asy
     .filter((c) => c.endpoint === "session/follow")
     .at(-1)!.args;
   assert.equal(requestArgs.request.assistantStream, true);
+});
+
+test("dsh connector attaches existing sessions through the workspace bridge", async (t) => {
+  const dir = await mkdtemp(join(socketTempDir(), "agenvo-dsh-attach-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const socket = join(dir, "native.sock");
+  const native = await desktop(socket);
+  t.after(native.close);
+  const adapter = new DshAdapter(
+    instanceConfigSchema.parse({
+      id: "dsh-attach",
+      label: "DSH",
+      kind: "dsh",
+      endpoint: "unix://" + socket,
+    }),
+  );
+  t.after(() => adapter.close());
+  await adapter.init();
+  const name = "workspace/attachSession";
+  const params = { path: "/work/project", sessionId: "session-cli" };
+
+  await t.test("discovery identifies a writable non-native bridge", () => {
+    const method = adapter.methods().find((m) => m.name === name);
+    assert.ok(method);
+    assert.equal(method.readOnly, false);
+    assert.match(
+      method.description,
+      /Connector bridge \(not a native DSH endpoint\)/,
+    );
+    assert.ok(
+      describe(adapter, { query: "create work context" }).items.some(
+        (m: any) => m.name === name,
+      ),
+    );
+  });
+  await t.test("invalid arguments are refused before dispatch", async () => {
+    const before = native.calls.length;
+    for (const invalid of [
+      {},
+      { sessionId: "s" },
+      { path: "/work" },
+      { ...params, path: "relative" },
+      { ...params, path: "" },
+      { ...params, path: 1 },
+      { ...params, sessionId: 1 },
+      { ...params, sessionId: "" },
+      { ...params, title: 1 },
+      { ...params, extra: true },
+    ])
+      await assert.rejects(
+        adapter.call(name, invalid),
+        (e: any) =>
+          e.code === "invalid_params" && e.execution === "not_started",
+      );
+    assert.equal(native.calls.length, before);
+  });
+  await t.test(
+    "success preserves the workspace and created flag with optional title",
+    async () => {
+      for (const created of [true, false]) {
+        const args = created ? { ...params, title: "Project" } : params;
+        const value = {
+          workspace: {
+            workspaceId: "w1",
+            path: params.path,
+            title: "Project",
+            sessionIds: [params.sessionId],
+          },
+          created,
+        };
+        native.reply(200, { ok: true, value });
+        const outcome = await adapter.call(name, args);
+        assert.equal(outcome.execution, "accepted");
+        assert.deepEqual(outcome.result, value);
+        assert.deepEqual(native.calls.at(-1), {
+          endpoint: name,
+          carrier: "bridge",
+          method: "POST",
+          args,
+        });
+      }
+    },
+  );
+  await t.test(
+    "plugin refusals preserve code, message and details",
+    async () => {
+      for (const message of [
+        "its cwd resolves to /work/other",
+        "session persistence holds no such session",
+      ]) {
+        const error = {
+          code: "bridge/attach-failed",
+          message,
+          details: { sessionId: params.sessionId },
+        };
+        native.reply(200, { ok: false, error });
+        const outcome = await adapter.call(name, params);
+        assert.equal(outcome.execution, "rejected");
+        assert.equal(outcome.error?.code, "native_error");
+        assert.ok(outcome.error?.message.includes(message));
+        assert.deepEqual(outcome.error?.native, error);
+      }
+    },
+  );
+  await t.test(
+    "old plugins report the required upgrade and desktop restart",
+    async () => {
+      native.reply(404, { error: "not found" });
+      const outcome = await adapter.call(name, params);
+      assert.equal(outcome.execution, "not_started");
+      assert.equal(outcome.error?.code, "unsupported");
+      assert.match(outcome.error!.message, /agent-fleet-dsh/);
+      assert.match(outcome.error!.message, /publish/i);
+      assert.match(outcome.error!.message, /restart.*DSH desktop/i);
+    },
+  );
 });

@@ -76,6 +76,27 @@ export class NativeBridge {
     return body as NativeReply;
   }
 
+  /** One plugin-owned connector bridge endpoint, not a native Typert endpoint. */
+  async invokeBridge(
+    endpoint: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<NativeReply> {
+    const res = await this.open(`/bridge/${endpoint}`, { args }, signal);
+    const body = await this.json(res);
+    if (res.statusCode === 404)
+      throw new Fault(
+        "unsupported",
+        "DSH plugin is too old for this connector bridge route; publish agent-fleet-dsh and restart the DSH desktop app",
+      );
+    if (res.statusCode !== 200)
+      throw new Fault(
+        "native_transport_error",
+        `DSH connector bridge HTTP ${res.statusCode}: ${body?.error ?? ""}`,
+      );
+    return body as NativeReply;
+  }
+
   /** One native stream endpoint; yields native items until the stream ends or `signal` aborts. */
   async *stream(
     endpoint: string,

@@ -65,6 +65,7 @@ export class DshAdapter implements Adapter {
     endpoint: string,
     args: Record<string, unknown>,
     write: boolean,
+    connectorBridge = false,
   ) {
     if (this.stopped) throw new Fault("runtime_unavailable");
     const controller = new AbortController();
@@ -72,7 +73,9 @@ export class DshAdapter implements Adapter {
     const timeout = setTimeout(() => controller.abort(), CALL_MS);
     let reply: NativeReply;
     try {
-      reply = await this.bridge.invoke(endpoint, args, controller.signal);
+      reply = connectorBridge
+        ? await this.bridge.invokeBridge(endpoint, args, controller.signal)
+        : await this.bridge.invoke(endpoint, args, controller.signal);
     } catch (error) {
       if (error instanceof Fault && error.code !== "native_transport_error")
         throw error;
@@ -204,7 +207,7 @@ export class DshAdapter implements Adapter {
     if (!operation.validate(params))
       throw new Fault(
         "invalid_params",
-        "Parameters do not match the native DSH input schema",
+        "Parameters do not match the DSH method input schema",
         "not_started",
         operation.validate.errors,
       );
@@ -228,6 +231,8 @@ export class DshAdapter implements Adapter {
     try {
       let result: unknown;
       if (name === "session/follow") result = await this.snapshot(nativeParams);
+      else if (name === "workspace/attachSession")
+        result = await this.invoke(name, params, true, true);
       else if (name === "session/list") result = await this.list(params);
       else if (name === "session/create") {
         result = await this.invoke(name, nativeParams, true);
