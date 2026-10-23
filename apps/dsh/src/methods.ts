@@ -121,6 +121,31 @@ export const operations = native.operations.map((operation) => ({
   inputSchema: schemaOf(operation),
   validate: ajv.compile(schemaOf(operation)),
 }));
+// Plugin-owned routes stay separate from the imported native Typert operations.
+const attachSessionSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      pattern: "^/",
+      description:
+        "Absolute directory path on the DSH desktop host; must resolve to the session cwd.",
+    },
+    sessionId: { type: "string", minLength: 1 },
+    title: { type: "string" },
+  },
+  required: ["path", "sessionId"],
+  additionalProperties: false,
+};
+operations.push({
+  name: "workspace/attachSession",
+  mode: "unary",
+  description:
+    "Create work context grouping: register an existing DSH session under its desktop sidebar workspace, creating the workspace if absent. Connector bridge (not a native DSH endpoint): served by the agent-fleet-dsh plugin through the desktop Host's workspace registry at POST /bridge/workspace/attachSession. Pass path (absolute), sessionId and optional title. Idempotent; path must resolve to the session cwd. Safe to call while the CLI session process is running; does not submit input or resume the session. Returns {workspace: {workspaceId, path, title, sessionIds}, created}. HTTP 404 means the plugin is too old: publish agent-fleet-dsh and restart the DSH desktop app.",
+  readOnly: false,
+  inputSchema: attachSessionSchema,
+  validate: ajv.compile(attachSessionSchema),
+});
 export const methods: Method[] = operations.map(
   ({ name, description, readOnly, inputSchema }) => ({
     name,

@@ -27,3 +27,18 @@ execution convention in the instance `context`.
 `session/follow` and `session/page` keep each `assistant/message` record's answer text in
 `message.content`; the duplicated streaming frames (`data.stream`) are included only when you pass
 `assistantStream: true`.
+
+`workspace/attachSession` is a writable Connector bridge, not a native DSH endpoint.
+The `agent-fleet-dsh` plugin serves it through the desktop Host's workspace registry
+at `POST /bridge/workspace/attachSession`. Call it with
+`{path: "/work/project", sessionId: "SESSION_ID", title: "Project"}` (`title` is optional)
+to register an existing session, including one created with `dsh --profile headless`,
+under a desktop sidebar project. `path` must be absolute and resolve to the session's cwd.
+Registration is idempotent and safe while the CLI process is running; it does not submit input.
+The plugin creates the workspace if absent and disambiguates duplicate names as
+`basename · short parent path`. The result is
+`{workspace: {workspaceId, path, title, sessionIds}, created}`.
+Plugin refusals preserve their code, message and details in `error.native` (`native_error`).
+HTTP 404 returns `unsupported`: the plugin is too old; publish `agent-fleet-dsh` and restart
+DSH desktop. HTTP 400 (invalid arguments) and 503 (Host workspace registry unavailable)
+are transport failures; no write is automatically retried.
