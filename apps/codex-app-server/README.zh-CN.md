@@ -17,3 +17,5 @@ AI Agent 请按照[安装指南](https://github.com/Xuanwo/agenvo/blob/v0.2.0/do
 需要 Node.js 24.13+。安装 Connector 不会安装 Herdr 或 Codex。
 
 [使用与部署说明](https://github.com/Xuanwo/agenvo/blob/v0.2.0/docs/usage.zh-CN.md) <!-- x-release-please-version -->
+
+读到本轮终态与答案后，经同一 connector 调 `thread/unsubscribe {threadId}` 交还订阅，原生 status 原样返回。事件观察不订阅其他客户端的 loaded 线程；重连只恢复尚未退订的显式订阅。退订后通知可能停止，持久历史用 `thread/read` 或 `thread/turns/list`。

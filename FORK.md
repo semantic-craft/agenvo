@@ -16,6 +16,8 @@
   `jobs.create` 固定发送 `runner: "app"`；`jobs.get` 和 `job.finished` 事件带上实际执行路径 `runner`。
 - `tests/dispatch.test.ts`：接收端契约、full access 默认值、`[Project:]` 标签、严格 runner 被拒的情形，以及 `job.finished` 事件。
 
+- `apps/codex-app-server`：暴露原生 `thread/unsubscribe`；事件观察只覆盖显式订阅，重连不恢复已退订线程。见[设计](design/codex-subscription-handoff.zh-CN.md)。
+
 ## 合并上游
 
 ```sh

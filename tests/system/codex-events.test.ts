@@ -133,5 +133,15 @@ for (const mode of ["websocket", "unix"] as const)
         (events) =>
           events.some((e) => e.data.native.turn?.status === "interrupted"),
       );
+      const released = await call("thread/unsubscribe", { threadId });
+      assert.equal(released.status, "unsubscribed");
+      // Persistent history remains readable without reacquiring a subscription.
+      const afterRelease = await call("thread/read", {
+        threadId,
+        includeTurns: true,
+      });
+      assert.equal(afterRelease.thread.turns.length, 3);
+      const again = await call("thread/unsubscribe", { threadId });
+      assert.ok(["notSubscribed", "notLoaded"].includes(again.status));
     },
   );

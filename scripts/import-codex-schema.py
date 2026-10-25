@@ -6,6 +6,7 @@ methods = {
  'thread/loaded/list': ('ThreadLoadedListParams', None),
  'thread/start': ('ThreadStartParams', ['model','modelProvider','cwd','approvalPolicy','approvalsReviewer','sandbox','config','baseInstructions','developerInstructions','ephemeral','historyMode']),
  'thread/resume': ('ThreadResumeParams', ['threadId','model','modelProvider','cwd','approvalPolicy','approvalsReviewer','sandbox','config','baseInstructions','developerInstructions','excludeTurns','initialTurnsPage']),
+ 'thread/unsubscribe': ('ThreadUnsubscribeParams', None),
  'thread/read': ('ThreadReadParams', None), 'thread/list': ('ThreadListParams', None), 'thread/archive': ('ThreadArchiveParams', None),
  'thread/turns/list': ('ThreadTurnsListParams', None), 'thread/items/list': ('ThreadItemsListParams', None),
  'turn/start': ('TurnStartParams', ['threadId','input','cwd','approvalPolicy','approvalsReviewer','sandboxPolicy','model','effort','summary','outputSchema']),

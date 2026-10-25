@@ -1373,6 +1373,19 @@
       "type": "object",
       "additionalProperties": false,
       "definitions": {}
+    },
+    "thread/unsubscribe": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": ["threadId"],
+      "title": "ThreadUnsubscribeParams",
+      "type": "object",
+      "additionalProperties": false,
+      "definitions": {}
     }
   },
   "responses": {

@@ -23,6 +23,8 @@ const descriptions: Record<keyof typeof schemas.methods, string> = {
     "Create a work context as a conversation thread without submitting input. Uses full access with no execution approval.",
   "thread/resume":
     "Load and subscribe to a thread without sending input. Applies full access; past notifications are not replayed.",
+  "thread/unsubscribe":
+    "Release this connection’s thread subscription and stop restoring it on reconnect. Returns native status. After the final subscriber leaves, the native server may unload the thread after a grace period. Read terminal output before releasing; later notifications may stop.",
   "thread/read":
     "Read thread metadata and optional conversation history, including input and output. History may be unavailable; notifications.list reads notifications received on this connection.",
   "thread/list":
@@ -165,47 +167,14 @@ export class CodexAdapter implements Adapter {
   watchEvents(emit: (event: RuntimeEvent) => void) {
     this.stopEvents?.();
     this.eventSink = emit;
-    let busy = false,
-      stopped = false;
-    const discover = async () => {
-      if (busy || stopped || !this.available) return;
-      busy = true;
-      try {
-        let cursor: string | undefined;
-        do {
-          const result: any = await this.rpc("thread/loaded/list", {
-            cursor,
-            limit: 50,
-          });
-          for (const id of result.data ?? []) {
-            if (stopped) return;
-            const threadId = typeof id === "string" ? id : id.id;
-            if (
-              typeof threadId === "string" &&
-              !this.resumeTargets.has(threadId)
-            )
-              await this.call("thread/resume", {
-                threadId,
-                excludeTurns: true,
-              });
-          }
-          cursor = result.nextCursor ?? undefined;
-        } while (cursor && !stopped);
-      } catch {
-        /* Native disconnect/reconnect is reported by the transport. */
-      } finally {
-        busy = false;
-      }
-    };
-    void discover();
-    const timer = setInterval(() => void discover(), 3000);
-    timer.unref();
+    // Explicit start/resume owns subscriptions; attach restores only those targets.
+    // Loaded threads may belong to Desktop or another client. Observing events
+    // must never acquire their writer by discovering and resuming them.
     return (this.stopEvents = () => {
-      stopped = true;
-      clearInterval(timer);
       this.eventSink = undefined;
     });
   }
+
   private publishEvent(
     nativeType: string,
     native: Record<string, unknown>,
@@ -344,7 +313,7 @@ export class CodexAdapter implements Adapter {
     ) {
       this.resumeTargets.add(result.thread.id);
     }
-    if (method === "thread/archive") {
+    if (["thread/archive", "thread/unsubscribe"].includes(method)) {
       this.resumeTargets.delete(String(params.threadId));
     }
     return accepted(result);
