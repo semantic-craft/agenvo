@@ -1,8 +1,4 @@
-import {
-  socketTempDir,
-  isolatedEnvironment,
-  until,
-} from "./support/environment.js";
+import { socketTempDir, isolatedEnvironment } from "./support/environment.js";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -18,7 +14,7 @@ import { instanceConfigSchema } from "./support/config.js";
 // A second native client owns resolution; the adapter only owns its connection.
 for (const mode of ["unix", "websocket"])
   test(
-    `${mode} auto-subscribes without turn history, applies full access and reconnects without replay`,
+    `${mode} observes only explicit subscriptions, releases writers and reconnects without replay`,
     {
       skip:
         process.platform === "win32" && mode === "unix"
@@ -54,8 +50,15 @@ for (const mode of ["unix", "websocket"])
               : p.method === "thread/loaded/list"
                 ? { data: ["t"], nextCursor: null }
                 : ["thread/resume", "thread/read"].includes(p.method)
-                  ? { thread: { id: "t" } }
-                  : {};
+                  ? { thread: { id: p.params.threadId } }
+                  : p.method === "thread/unsubscribe"
+                    ? {
+                        status:
+                          p.params.threadId === "released"
+                            ? "unsubscribed"
+                            : "notSubscribed",
+                      }
+                    : {};
           ws.send(JSON.stringify({ id: p.id, result }));
         });
       });
@@ -90,10 +93,17 @@ for (const mode of ["unix", "websocket"])
       const info = adapter.methods().find((m) => m.name === "thread/resume")!;
       assert.ok((info.inputSchema as any).properties.sandbox);
       const stopWatching = adapter.watchEvents(() => {});
-      await until(
-        async () => calls.find((p) => p.method === "thread/resume"),
-        Boolean,
+      await new Promise((resolve) => setTimeout(resolve, 3100));
+      await adapter.call("model/list", {});
+      assert.equal(
+        calls.some((p) => p.method === "thread/resume"),
+        false,
+        "watching must not acquire a loaded thread owned by another client",
       );
+      await adapter.call("thread/resume", {
+        threadId: "t",
+        excludeTurns: true,
+      });
       stopWatching();
       const resumed = calls.find((p) => p.method === "thread/resume").params;
       assert.equal(resumed.threadId, "t");
@@ -176,6 +186,16 @@ for (const mode of ["unix", "websocket"])
         0,
         "unsupported shared requests must stay with the desktop client",
       );
+      for (const threadId of ["released", "already-released"]) {
+        await adapter.call("thread/resume", { threadId });
+        const result = await adapter.call("thread/unsubscribe", { threadId });
+        assert.deepEqual(result.result, {
+          status: threadId === "released" ? "unsubscribed" : "notSubscribed",
+        });
+      }
+      const stopAfterRelease = adapter.watchEvents(() => {});
+      await adapter.call("model/list", {});
+      stopAfterRelease();
       const interrupted = assert.rejects(
         adapter.call("turn/start", {
           threadId: "t",

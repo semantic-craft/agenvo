@@ -17,3 +17,5 @@ For AI agents: follow the [installation guide](https://github.com/Xuanwo/agenvo/
 Requires Node.js 24.13+. Installing a Connector does not install Herdr or Codex.
 
 [Usage and deployment](https://github.com/Xuanwo/agenvo/blob/v0.2.0/docs/usage.md) <!-- x-release-please-version -->
+
+After reading the terminal turn and output, call `thread/unsubscribe {threadId}` on the same connector to release its subscription. The native status is returned unchanged. Event watching does not subscribe to other clients’ loaded threads; reconnect restores only explicit subscriptions that have not been released. Notifications may stop after unsubscribe; use `thread/read` or `thread/turns/list` for durable history.
